@@ -72,7 +72,7 @@ export default function SessionPage() {
 
   const handleDevSubmit = async (text: string) => {
     try {
-      await api.sendDevNote(id, text);
+      await api.sendDevMessage(id, text);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -138,7 +138,11 @@ export default function SessionPage() {
           />
         </div>
         <div className="flex-1">
-          <InputBar variant="dev" onSubmit={handleDevSubmit} />
+          <InputBar
+            variant="dev"
+            busy={session.busy}
+            onSubmit={handleDevSubmit}
+          />
         </div>
       </div>
     </div>

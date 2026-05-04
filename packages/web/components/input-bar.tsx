@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Send, StickyNote } from 'lucide-react';
+import { Send } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 export interface InputBarProps {
@@ -28,9 +28,11 @@ export function InputBar({
       : hasPendingApproval
         ? 'y to allow, anything else denies ↵'
         : busy
-          ? 'working… (queued for next turn)'
+          ? 'working…'
           : 'message supervisor ↵'
-    : 'note for developer (queued for next dev turn) ↵';
+    : busy
+      ? 'working…'
+      : 'message developer ↵';
 
   const ringColor = isSup ? 'focus:border-cyan-600' : 'focus:border-amber-600';
   const buttonColor = isSup
@@ -39,10 +41,9 @@ export function InputBar({
   const labelText = isSup ? 'sup' : 'dev';
   const labelColor = isSup ? 'text-cyan-400' : 'text-amber-400';
 
-  // Sup input is disabled while a turn is busy AND no pending Q/A is open
-  // (so user can still answer while busy). Dev input is always available
-  // — notes just queue up for the next dev turn.
-  const disabled = isSup && busy && !hasPendingQuestion && !hasPendingApproval;
+  // Both inputs are disabled while a turn is busy (no pending Q/A bypass
+  // for either; a single turn runs at a time). Sup keeps its Q/A bypass.
+  const disabled = busy && !(isSup && (hasPendingQuestion || hasPendingApproval));
 
   const submit = () => {
     const trimmed = text.trim();
@@ -87,9 +88,9 @@ export function InputBar({
           buttonColor,
           'disabled:opacity-40 disabled:cursor-not-allowed',
         )}
-        aria-label={isSup ? 'send to supervisor' : 'note to developer'}
+        aria-label={isSup ? 'send to supervisor' : 'send to developer'}
       >
-        {isSup ? <Send size={14} /> : <StickyNote size={14} />}
+        <Send size={14} />
       </button>
     </div>
   );

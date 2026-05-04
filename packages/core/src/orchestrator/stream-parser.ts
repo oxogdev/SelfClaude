@@ -136,6 +136,23 @@ export function extractSessionId(evt: StreamEvent): string | null {
   return typeof sid === 'string' ? sid : null;
 }
 
+/**
+ * Extract a token-level text delta from a `stream_event` (only emitted
+ * when the upstream was launched with `--include-partial-messages`).
+ * Anthropic stream-json shape:
+ *   {type: 'stream_event', event: {type: 'content_block_delta',
+ *     delta: {type: 'text_delta', text: '…'}}}
+ */
+export function extractStreamTextDelta(evt: StreamEvent): string | null {
+  if (evt.type !== 'stream_event') return null;
+  const inner = (evt as { event?: { type?: string; delta?: { type?: string; text?: string } } })
+    .event;
+  if (!inner) return null;
+  if (inner.type !== 'content_block_delta') return null;
+  if (inner.delta?.type !== 'text_delta') return null;
+  return typeof inner.delta.text === 'string' ? inner.delta.text : null;
+}
+
 export interface ToolUseBlock {
   id: string;
   name: string;

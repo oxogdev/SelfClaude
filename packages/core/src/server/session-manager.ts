@@ -3,8 +3,10 @@ import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import { Orchestrator, type PendingApprovalView, type PendingQuestionView } from '../orchestrator/index.js';
 import { runConversationTurn } from '../orchestrator/conversation.js';
+import { runClaudeTurn } from '../claude-code/spawn.js';
 import {
   extractAssistantText,
+  extractStreamTextDelta,
   extractToolResults,
   extractToolUses,
   type StreamEvent,
@@ -52,7 +54,10 @@ export type SessionEvent =
   | { kind: 'iteration-end'; iteration: number }
   | { kind: 'error'; message: string }
   | { kind: 'turn-busy'; busy: boolean }
-  | { kind: 'user-note-dev'; text: string; ts: number };
+  | { kind: 'user-note-dev'; text: string; ts: number }
+  | { kind: 'user-message-dev'; text: string; ts: number }
+  | { kind: 'sup-message-delta'; delta: string; ts: number }
+  | { kind: 'dev-text-delta'; delta: string; ts: number };
 
 export interface SessionContext {
   id: string;
@@ -162,24 +167,76 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * Drop a user-authored note into the developer's inbox without triggering
-   * a turn. The next time the developer agent runs, the note arrives via the
-   * UserPromptSubmit hook injection, alongside any supervisor-routed task.
-   * This lets the user steer the developer directly (e.g. "be careful with
-   * that file", "use port 4000 instead") without interrupting the
-   * supervisor's planning.
+   * Send a direct message to the developer agent, bypassing the supervisor.
+   * Triggers a dev-only turn so the developer responds immediately. The
+   * supervisor receives an informational copy (in its inbox) so its next
+   * turn knows the side conversation happened.
    */
-  async noteForDeveloper(id: string, text: string): Promise<void> {
+  async messageDeveloper(id: string, text: string): Promise<void> {
     const ctx = this.sessions.get(id);
     if (!ctx) throw new Error(`session not found: ${id}`);
+    if (ctx.busy) throw new Error('session is busy with another turn');
+
     const ts = Date.now();
+    await this.appendLog(ctx, { type: 'user-message-dev', text, ts });
+    this.emitEvent(ctx, { kind: 'user-message-dev', text, ts });
+
     ctx.orchestrator.messages.enqueue({
       to: 'developer',
       source: 'user',
-      body: `USER_NOTE_FOR_DEVELOPER:\n${text}`,
+      body: `USER_DIRECT_MESSAGE:\n${text}`,
     });
-    await this.appendLog(ctx, { type: 'user-note-dev', text, ts });
-    this.emitEvent(ctx, { kind: 'user-note-dev', text, ts });
+    // Keep the supervisor in the loop without disrupting its planning.
+    ctx.orchestrator.messages.enqueue({
+      to: 'supervisor',
+      source: 'user',
+      body: `USER_DEV_DIALOG (informational): user said directly to developer: "${text}"`,
+    });
+
+    this.emitEvent(ctx, { kind: 'turn-busy', busy: true });
+    const run = (async () => {
+      try {
+        const orch = ctx.orchestrator;
+        const ws = orch.getWorkspace();
+        orch.dispatch({ kind: 'dev-turn-start' });
+        const devResult = await runClaudeTurn(
+          {
+            role: 'developer',
+            cwd: ws.cwd,
+            prompt:
+              'A direct user message has been injected into your context (USER_DIRECT_MESSAGE). ' +
+              'Respond to the user clearly and concisely. Use tools if appropriate, but plain ' +
+              'text replies are also fine. The supervisor is aware of this side conversation.',
+            resumeSessionId: ctx.developerSessionId ?? undefined,
+            settingsPath: ws.settingsPath,
+            permissionMode: 'acceptEdits',
+            envOverrides: orch.hookEnv('developer'),
+            enableChrome: false,
+          },
+          (e) => this.onDeveloperStreamEvent(ctx, e),
+        );
+        ctx.developerSessionId = devResult.sessionId ?? ctx.developerSessionId;
+        orch.dispatch({ kind: 'dev-turn-end' });
+
+        const devText = devResult.events
+          .filter((e) => e.type === 'assistant')
+          .map((e) => extractAssistantText(e))
+          .join('\n');
+        if (devText) {
+          ctx.orchestrator.messages.enqueue({
+            to: 'supervisor',
+            source: 'developer',
+            body: `USER_DEV_DIALOG (informational): developer replied: ${devText.slice(0, 800)}`,
+          });
+        }
+      } catch (e) {
+        this.emitEvent(ctx, { kind: 'error', message: (e as Error).message });
+      } finally {
+        ctx.busy = null;
+        this.emitEvent(ctx, { kind: 'turn-busy', busy: false });
+      }
+    })();
+    ctx.busy = run;
   }
 
   async resolveQuestion(id: string, questionId: string, answer: string): Promise<boolean> {
@@ -303,10 +360,17 @@ export class SessionManager extends EventEmitter {
   }
 
   private onSupervisorStreamEvent(ctx: SessionContext, e: StreamEvent): void {
+    const ts = Date.now();
+    // Token-level delta (only with --include-partial-messages). Ephemeral —
+    // chat-log gets the full text on the final assistant event below.
+    const delta = extractStreamTextDelta(e);
+    if (delta) {
+      this.emitEvent(ctx, { kind: 'sup-message-delta', delta, ts });
+      return;
+    }
     if (e.type !== 'assistant') return;
     const text = extractAssistantText(e);
     if (!text) return;
-    const ts = Date.now();
     void this.appendLog(ctx, { type: 'sup-message', text, ts });
     this.emitEvent(ctx, { kind: 'sup-message', text, ts });
     const { tasks } = extractDeveloperTasks(text);
@@ -320,6 +384,11 @@ export class SessionManager extends EventEmitter {
 
   private onDeveloperStreamEvent(ctx: SessionContext, e: StreamEvent): void {
     const ts = Date.now();
+    const delta = extractStreamTextDelta(e);
+    if (delta) {
+      this.emitEvent(ctx, { kind: 'dev-text-delta', delta, ts });
+      return;
+    }
     for (const tu of extractToolUses(e)) {
       const id = randomUUID();
       void this.appendLog(ctx, {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { Wrench, MessageSquare, FileText, Compass, StickyNote } from 'lucide-react';
+import { Wrench, MessageSquare, FileText, Compass } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import type { ChatLogEntry } from '@/lib/types';
 
@@ -103,16 +103,20 @@ export function DevTimeline({
             </div>
           );
         }
-        if (item.kind === 'user-note') {
+        if (item.kind === 'user-note' || item.kind === 'user-message') {
+          const isMessage = item.kind === 'user-message';
           return (
-            <div
-              key={item.key}
-              className="flex items-start gap-2 rounded-md border border-magenta-700/40 border-amber-700/40 bg-amber-950/20 px-3 py-2 text-sm"
-            >
-              <StickyNote size={14} className="text-amber-400 mt-0.5 shrink-0" />
-              <div className="min-w-0">
-                <div className="text-xs text-amber-400 mb-0.5">your note for dev</div>
-                <p className="text-amber-100 whitespace-pre-wrap">{item.text}</p>
+            <div key={item.key} className="flex justify-end">
+              <div
+                className={cn(
+                  'max-w-[85%] rounded-2xl rounded-tr-md px-4 py-2 text-sm border',
+                  'bg-amber-600/15 border-amber-700/40',
+                )}
+              >
+                <div className="text-xs text-amber-300/80 mb-0.5">
+                  you {isMessage ? '→ dev' : '(note for dev)'}
+                </div>
+                <p className="whitespace-pre-wrap text-amber-50">{item.text}</p>
               </div>
             </div>
           );
@@ -136,7 +140,8 @@ type TimelineItem =
   | { kind: 'text'; key: string; text: string }
   | { kind: 'task-marker'; key: string; summary: string }
   | { kind: 'phase-doc'; key: string; filename: string }
-  | { kind: 'user-note'; key: string; text: string };
+  | { kind: 'user-note'; key: string; text: string }
+  | { kind: 'user-message'; key: string; text: string };
 
 function buildItems(chatLog: ChatLogEntry[]): TimelineItem[] {
   const tools = new Map<string, Extract<TimelineItem, { kind: 'tool' }>>();
@@ -166,6 +171,8 @@ function buildItems(chatLog: ChatLogEntry[]): TimelineItem[] {
       out.push({ kind: 'phase-doc', key: `${entry.ts}-doc`, filename: entry.filename });
     } else if (entry.type === 'user-note-dev') {
       out.push({ kind: 'user-note', key: `${entry.ts}-note`, text: entry.text });
+    } else if (entry.type === 'user-message-dev') {
+      out.push({ kind: 'user-message', key: `${entry.ts}-uMsg`, text: entry.text });
     }
   }
   return out;

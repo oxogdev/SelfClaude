@@ -47,8 +47,8 @@ export const api = {
       body: JSON.stringify({ text }),
     });
   },
-  sendDevNote(id: string, text: string) {
-    return jsonFetch<{ accepted: boolean }>(`/api/sessions/${id}/dev-note`, {
+  sendDevMessage(id: string, text: string) {
+    return jsonFetch<{ accepted: boolean }>(`/api/sessions/${id}/dev-message`, {
       method: 'POST',
       body: JSON.stringify({ text }),
     });

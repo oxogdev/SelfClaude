@@ -21,6 +21,7 @@ export {
   StreamEventSchema,
   extractAssistantText,
   extractSessionId,
+  extractStreamTextDelta,
   extractToolUses,
   extractToolResults,
   type StreamEvent,

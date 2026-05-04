@@ -62,6 +62,11 @@ export const ChatLogEntrySchema = z.discriminatedUnion('type', [
     text: z.string(),
     ts: z.number(),
   }),
+  z.object({
+    type: z.literal('user-message-dev'),
+    text: z.string(),
+    ts: z.number(),
+  }),
 ]);
 
 export type ChatLogEntry = z.infer<typeof ChatLogEntrySchema>;

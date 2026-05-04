@@ -81,12 +81,28 @@ export const useSessionStore = create<MultiSessionState>((set) => ({
         case 'user-message':
           next = { ...cur, chatLog: append(cur.chatLog, { type: 'user-message', text: event.text, ts }) };
           break;
-        case 'sup-message':
-          next = { ...cur, chatLog: append(cur.chatLog, { type: 'sup-message', text: event.text, ts }) };
+        case 'sup-message': {
+          // If the streaming-built bubble is still at the tail, replace it
+          // with the final full text rather than duplicating.
+          const last = cur.chatLog[cur.chatLog.length - 1];
+          if (last?.type === 'sup-message' && Math.abs(last.ts - ts) < 60_000) {
+            const updated: ChatLogEntry = { ...last, text: event.text };
+            next = { ...cur, chatLog: [...cur.chatLog.slice(0, -1), updated] };
+          } else {
+            next = { ...cur, chatLog: append(cur.chatLog, { type: 'sup-message', text: event.text, ts }) };
+          }
           break;
-        case 'dev-text':
-          next = { ...cur, chatLog: append(cur.chatLog, { type: 'dev-text', text: event.text, ts }) };
+        }
+        case 'dev-text': {
+          const last = cur.chatLog[cur.chatLog.length - 1];
+          if (last?.type === 'dev-text' && Math.abs(last.ts - ts) < 60_000) {
+            const updated: ChatLogEntry = { ...last, text: event.text };
+            next = { ...cur, chatLog: [...cur.chatLog.slice(0, -1), updated] };
+          } else {
+            next = { ...cur, chatLog: append(cur.chatLog, { type: 'dev-text', text: event.text, ts }) };
+          }
           break;
+        }
         case 'dev-tool-call':
           next = {
             ...cur,
@@ -156,6 +172,41 @@ export const useSessionStore = create<MultiSessionState>((set) => ({
             chatLog: append(cur.chatLog, { type: 'user-note-dev', text: event.text, ts }),
           };
           break;
+        case 'user-message-dev':
+          next = {
+            ...cur,
+            chatLog: append(cur.chatLog, { type: 'user-message-dev', text: event.text, ts }),
+          };
+          break;
+        case 'sup-message-delta': {
+          // Append delta into the last sup-message bubble (creating one if
+          // the previous entry isn't a sup-message). Ephemeral state — the
+          // final 'sup-message' event below replaces with the full text.
+          const last = cur.chatLog[cur.chatLog.length - 1];
+          if (last?.type === 'sup-message') {
+            const updated: ChatLogEntry = { ...last, text: last.text + event.delta };
+            next = { ...cur, chatLog: [...cur.chatLog.slice(0, -1), updated] };
+          } else {
+            next = {
+              ...cur,
+              chatLog: append(cur.chatLog, { type: 'sup-message', text: event.delta, ts }),
+            };
+          }
+          break;
+        }
+        case 'dev-text-delta': {
+          const last = cur.chatLog[cur.chatLog.length - 1];
+          if (last?.type === 'dev-text') {
+            const updated: ChatLogEntry = { ...last, text: last.text + event.delta };
+            next = { ...cur, chatLog: [...cur.chatLog.slice(0, -1), updated] };
+          } else {
+            next = {
+              ...cur,
+              chatLog: append(cur.chatLog, { type: 'dev-text', text: event.delta, ts }),
+            };
+          }
+          break;
+        }
         case 'iteration-end':
         case 'error':
           // No-op for state; could surface via toast in UI.

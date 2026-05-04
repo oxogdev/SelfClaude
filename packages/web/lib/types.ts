@@ -65,7 +65,8 @@ export type ChatLogEntry =
   | { type: 'approval'; id: string; action: string; reason: string; ts: number }
   | { type: 'approval-resolved'; id: string; decision: 'allow' | 'deny'; ts: number }
   | { type: 'iteration-end'; iteration: number; ts: number }
-  | { type: 'user-note-dev'; text: string; ts: number };
+  | { type: 'user-note-dev'; text: string; ts: number }
+  | { type: 'user-message-dev'; text: string; ts: number };
 
 // Session SSE events (match packages/core/src/server/session-manager.ts).
 export type SessionEvent =
@@ -91,7 +92,10 @@ export type SessionEvent =
   | { kind: 'iteration-end'; iteration: number }
   | { kind: 'error'; message: string }
   | { kind: 'turn-busy'; busy: boolean }
-  | { kind: 'user-note-dev'; text: string; ts: number };
+  | { kind: 'user-note-dev'; text: string; ts: number }
+  | { kind: 'user-message-dev'; text: string; ts: number }
+  | { kind: 'sup-message-delta'; delta: string; ts: number }
+  | { kind: 'dev-text-delta'; delta: string; ts: number };
 
 export interface SessionSnapshot {
   meta: SessionMeta;

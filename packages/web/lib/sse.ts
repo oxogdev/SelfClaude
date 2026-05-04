@@ -22,7 +22,9 @@ export function subscribeSession(
     'state-changed',
     'user-message',
     'sup-message',
+    'sup-message-delta',
     'dev-text',
+    'dev-text-delta',
     'dev-tool-call',
     'dev-tool-result',
     'task-marker',
@@ -35,6 +37,7 @@ export function subscribeSession(
     'error',
     'turn-busy',
     'user-note-dev',
+    'user-message-dev',
   ];
 
   for (const kind of kinds) {
