@@ -101,3 +101,28 @@ export {
   type WorkspacePaths,
   type ScriptName,
 } from './hooks/installer.js';
+
+export {
+  appendChatLogEntry,
+  readChatLog,
+  chatLogPath,
+  ChatLogEntrySchema,
+  type ChatLogEntry,
+} from './project/chat-log.js';
+
+export {
+  SessionManager,
+  type SessionContext,
+  type SessionMeta,
+  type SessionSnapshot,
+  type SessionEvent,
+} from './server/session-manager.js';
+
+export {
+  buildWebApi,
+  startWebApi,
+  type WebApiOptions,
+  type WebApiHandle,
+} from './server/web-api.js';
+
+export { streamSseFromEmitter } from './server/sse.js';
