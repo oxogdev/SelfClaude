@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { resolve } from 'node:path';
 import { Command } from 'commander';
+import { daemonLogs, daemonStart, daemonStatus, daemonStop } from './daemon.js';
 
 const program = new Command();
 
@@ -11,19 +12,19 @@ program
 
 program
   .command('start', { isDefault: true })
-  .description('Start the orchestrator (web UI by default; legacy TUI via --tui)')
+  .description('Start SelfClaude (daemon by default; --foreground for debug)')
   .option('--demo', 'Render the legacy TUI with synthetic events (no real claude subprocess)')
   .option('--tui', 'Use the legacy Ink TUI instead of the web UI')
-  .option('--web', 'Force web UI (default when --tui/--demo are absent)')
-  .option('--no-open', "Don't auto-open the browser when starting in web mode")
-  .option('--port <port>', 'Web API port (web mode only)', '7423')
-  .option('--web-port <port>', 'Next.js dev server port (web mode only)', '3000')
+  .option('--foreground', 'Run in the foreground (Ctrl+C exits) — daemon is the default')
+  .option('--no-open', "Don't auto-open the browser")
+  .option('--port <port>', 'Web API port', '7423')
+  .option('--web-port <port>', 'Next.js dev server port', '3000')
   .option('--cwd <dir>', 'Working directory the orchestrator operates in (TUI mode only)')
   .action(
     async (opts: {
       demo?: boolean;
       tui?: boolean;
-      web?: boolean;
+      foreground?: boolean;
       open?: boolean;
       port?: string;
       webPort?: string;
@@ -35,13 +36,21 @@ program
         return;
       }
 
-      // Default to web UI; --tui is the explicit legacy fallback.
+      // Web mode is the default. Daemon unless explicitly --foreground.
       if (!opts.tui) {
-        await runWebMode({
-          apiPort: Number(opts.port ?? 7423),
-          nextPort: Number(opts.webPort ?? 3000),
-          openBrowser: opts.open !== false,
-        });
+        if (opts.foreground) {
+          await runWebMode({
+            apiPort: Number(opts.port ?? 7423),
+            nextPort: Number(opts.webPort ?? 3000),
+            openBrowser: opts.open !== false,
+          });
+        } else {
+          await daemonStart({
+            apiPort: Number(opts.port ?? 7423),
+            webPort: Number(opts.webPort ?? 3000),
+            openBrowser: opts.open !== false,
+          });
+        }
         return;
       }
 
@@ -186,6 +195,37 @@ async function runWebMode(opts: {
     void stop().then(() => process.exit(code ?? 0));
   });
 }
+
+program
+  .command('stop')
+  .description('Stop the SelfClaude daemon')
+  .action(async () => {
+    await daemonStop();
+  });
+
+program
+  .command('restart')
+  .description('Restart the SelfClaude daemon')
+  .action(async () => {
+    await daemonStop();
+    await daemonStart();
+  });
+
+program
+  .command('status')
+  .description('Show SelfClaude daemon status')
+  .action(() => {
+    daemonStatus();
+  });
+
+program
+  .command('logs')
+  .description('Show SelfClaude daemon logs')
+  .option('-f, --follow', 'follow log output')
+  .option('-n, --lines <n>', 'number of lines to show (default 100)', '100')
+  .action((opts: { follow?: boolean; lines?: string }) => {
+    daemonLogs({ follow: opts.follow, lines: opts.lines ? Number(opts.lines) : undefined });
+  });
 
 program
   .command('link-telegram')
