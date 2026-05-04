@@ -15,13 +15,13 @@ const STEPS: DemoStep[] = [
       s.setSupervisorActive(true);
       s.appendSupervisor({
         kind: 'system',
-        text: 'Supervisor online — discovery starting.',
+        text: 'supervisor online — discovery starting',
         ts: Date.now(),
       });
     },
   },
   {
-    delayMs: 1200,
+    delayMs: 1100,
     apply: (s) =>
       s.appendSupervisor({
         kind: 'supervisor',
@@ -30,48 +30,80 @@ const STEPS: DemoStep[] = [
       }),
   },
   {
-    delayMs: 2400,
+    delayMs: 2300,
     apply: (s) =>
       s.appendSupervisor({
         kind: 'user',
-        text: 'Bir url shortener; postgres + node.',
+        text: 'Bir url shortener; postgres + node, MVP.',
         ts: Date.now(),
       }),
   },
   {
-    delayMs: 3200,
+    delayMs: 3100,
     apply: (s) => {
       s.setSupervisorActive(false);
       s.setDeveloperActive(true);
       s.setPhase('phase-loop');
-      s.appendDeveloper({ kind: 'system', payload: 'Developer turn started.', ts: Date.now() });
+      const turn = s.bumpTurn();
+      s.appendDeveloper({ kind: 'turn-marker', summary: `── turn ${turn} ──` });
+      s.appendDeveloper({ kind: 'task-marker', summary: 'sup→dev: scaffold fastify routes' });
+      s.appendSupervisor({
+        kind: 'task-tag',
+        text: 'scaffold fastify routes for /shorten and /:code',
+        ts: Date.now(),
+      });
     },
   },
   {
-    delayMs: 3700,
-    apply: (s) =>
-      s.appendDeveloper({ kind: 'tool', payload: 'Read package.json', ts: Date.now() }),
+    delayMs: 3600,
+    apply: (s) => {
+      const id = s.appendDeveloper({
+        kind: 'tool',
+        summary: 'Read: package.json',
+        toolUseId: 'tu_demo_1',
+        toolName: 'Read',
+        toolInput: { file_path: '/proj/package.json' },
+      });
+      // pretend tool result a moment later
+      setTimeout(() => {
+        s.updateDeveloperEvent(id, {
+          toolResultText: '46 lines\n{\n  "name": "url-shortener",\n  "type": "module"\n}',
+          isError: false,
+        });
+      }, 400);
+    },
   },
   {
-    delayMs: 4200,
-    apply: (s) => s.appendDeveloper({ kind: 'tool-result', payload: '46 lines', ts: Date.now() }),
+    delayMs: 4400,
+    apply: (s) => {
+      const id = s.appendDeveloper({
+        kind: 'tool',
+        summary: 'Write: src/server.ts',
+        toolUseId: 'tu_demo_2',
+        toolName: 'Write',
+        toolInput: {
+          file_path: '/proj/src/server.ts',
+          content: 'import Fastify from "fastify";\nconst app = Fastify();\n…',
+        },
+      });
+      setTimeout(() => {
+        s.updateDeveloperEvent(id, {
+          toolResultText: 'wrote 38 lines',
+          isError: false,
+        });
+      }, 350);
+    },
   },
   {
-    delayMs: 4800,
-    apply: (s) =>
-      s.appendDeveloper({ kind: 'tool', payload: 'Write src/server.ts', ts: Date.now() }),
-  },
-  {
-    delayMs: 5500,
+    delayMs: 5300,
     apply: (s) =>
       s.appendDeveloper({
         kind: 'text',
-        payload: 'Bootstrapped fastify server, routes scaffolded.',
-        ts: Date.now(),
+        summary: 'Bootstrapped fastify server, /shorten and /:code routes scaffolded.',
       }),
   },
   {
-    delayMs: 6500,
+    delayMs: 6200,
     apply: (s) => {
       s.setDeveloperActive(false);
       s.setSupervisorActive(true);

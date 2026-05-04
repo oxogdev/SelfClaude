@@ -135,3 +135,91 @@ export function extractSessionId(evt: StreamEvent): string | null {
   const sid = (evt as { session_id?: unknown }).session_id;
   return typeof sid === 'string' ? sid : null;
 }
+
+export interface ToolUseBlock {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export interface ToolResultBlock {
+  toolUseId: string;
+  text: string;
+  isError: boolean;
+}
+
+/**
+ * Pull tool_use content blocks out of an assistant event. Each block carries
+ * its own id (used to pair with a later tool_result), name, and full input.
+ */
+export function extractToolUses(evt: StreamEvent): ToolUseBlock[] {
+  if (evt.type !== 'assistant') return [];
+  const message = (evt as { message?: { content?: unknown[] } }).message;
+  const content = message?.content;
+  if (!Array.isArray(content)) return [];
+  const out: ToolUseBlock[] = [];
+  for (const item of content) {
+    if (
+      typeof item !== 'object' ||
+      item === null ||
+      (item as { type?: unknown }).type !== 'tool_use'
+    ) {
+      continue;
+    }
+    const id = (item as { id?: unknown }).id;
+    const name = (item as { name?: unknown }).name;
+    const input = (item as { input?: unknown }).input;
+    if (typeof id !== 'string' || typeof name !== 'string') continue;
+    out.push({
+      id,
+      name,
+      input: typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {},
+    });
+  }
+  return out;
+}
+
+/**
+ * Pull tool_result blocks out of a `user`-typed event (Claude Code emits
+ * tool results as synthetic user messages whose content is `tool_result`
+ * blocks pointing back to the corresponding tool_use_id).
+ */
+export function extractToolResults(evt: StreamEvent): ToolResultBlock[] {
+  if (evt.type !== 'user' && evt.type !== 'assistant') return [];
+  const message = (evt as { message?: { content?: unknown[] } }).message;
+  const content = message?.content;
+  if (!Array.isArray(content)) return [];
+  const out: ToolResultBlock[] = [];
+  for (const item of content) {
+    if (
+      typeof item !== 'object' ||
+      item === null ||
+      (item as { type?: unknown }).type !== 'tool_result'
+    ) {
+      continue;
+    }
+    const toolUseId = (item as { tool_use_id?: unknown }).tool_use_id;
+    if (typeof toolUseId !== 'string') continue;
+    const isError = (item as { is_error?: unknown }).is_error === true;
+    const rawContent = (item as { content?: unknown }).content;
+    let text = '';
+    if (typeof rawContent === 'string') {
+      text = rawContent;
+    } else if (Array.isArray(rawContent)) {
+      const parts: string[] = [];
+      for (const c of rawContent) {
+        if (
+          typeof c === 'object' &&
+          c !== null &&
+          (c as { type?: unknown }).type === 'text' &&
+          typeof (c as { text?: unknown }).text === 'string'
+        ) {
+          parts.push((c as { text: string }).text);
+        }
+      }
+      text = parts.join('\n');
+    }
+    out.push({ toolUseId, text, isError });
+  }
+  return out;
+}

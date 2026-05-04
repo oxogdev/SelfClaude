@@ -11,11 +11,31 @@ import type {
 } from '../orchestrator/index.js';
 import {
   extractAssistantText,
+  extractToolResults,
+  extractToolUses,
   type StreamEvent,
 } from '../orchestrator/stream-parser.js';
 import { runDualAgentTurn } from '../orchestrator/loop.js';
 import { parseApprovalReply } from '../telegram/parser.js';
 import type { FsmState } from '../orchestrator/state-machine.js';
+import { extractDeveloperTasks } from '../orchestrator/tag-parser.js';
+
+const ALT_SCREEN_ON = '\x1b[?1049h';
+const ALT_SCREEN_OFF = '\x1b[?1049l';
+const CLEAR_HOME = '\x1b[2J\x1b[H';
+
+function enterAltScreen(): void {
+  if (process.stdout.isTTY) {
+    process.stdout.write(ALT_SCREEN_ON);
+    process.stdout.write(CLEAR_HOME);
+  }
+}
+
+function leaveAltScreen(): void {
+  if (process.stdout.isTTY) {
+    process.stdout.write(ALT_SCREEN_OFF);
+  }
+}
 
 function handleUserInputDemo(text: string): void {
   const trimmed = text.trim();
@@ -45,74 +65,63 @@ function handleUserInputDemo(text: string): void {
   s.appendSupervisor({ kind: 'user', text: trimmed, ts: Date.now() });
 }
 
+function describeToolInputForSummary(name: string, input: Record<string, unknown>): string {
+  if (name === 'Bash') {
+    const cmd = String(input.command ?? '');
+    return cmd.length > 80 ? `${cmd.slice(0, 77)}...` : cmd;
+  }
+  if (name === 'Read' || name === 'Edit' || name === 'Write') {
+    return String(input.file_path ?? '?');
+  }
+  if (name === 'Grep') {
+    return String(input.pattern ?? '?');
+  }
+  if (name === 'Glob') {
+    return String(input.pattern ?? '?');
+  }
+  // Generic fallback: first short string field
+  for (const v of Object.values(input)) {
+    if (typeof v === 'string' && v.length < 80) return v;
+  }
+  return '';
+}
+
 export async function startDemo(): Promise<void> {
+  enterAltScreen();
   const instance = render(
     createElement(App, {
       onUserInput: handleUserInputDemo,
-      onExit: () => undefined,
+      onExit: () => leaveAltScreen(),
     }),
   );
   runDemo();
-  await instance.waitUntilExit();
-}
-
-interface AssistantContent {
-  type?: unknown;
-  text?: unknown;
-  name?: unknown;
-  input?: unknown;
-}
-
-function describeToolUse(c: AssistantContent): string | null {
-  if ((c as { type?: unknown }).type !== 'tool_use') return null;
-  const name = String(c.name ?? '?');
-  const input = (c.input ?? {}) as Record<string, unknown>;
-  if (name === 'Bash') {
-    const cmd = String(input.command ?? '');
-    return `${name}: ${cmd.length > 80 ? `${cmd.slice(0, 77)}...` : cmd}`;
-  }
-  if (name === 'Read' || name === 'Edit' || name === 'Write') {
-    return `${name}: ${input.file_path ?? '?'}`;
-  }
-  return name;
-}
-
-function pumpStreamEventsToTui(role: 'supervisor' | 'developer', e: StreamEvent): void {
-  const s = useTuiStore.getState();
-  if (e.type !== 'assistant') return;
-  const msg = (e as { message?: { content?: AssistantContent[] } }).message;
-  const content = msg?.content;
-  if (!Array.isArray(content)) return;
-  for (const c of content) {
-    if (c.type === 'text' && typeof c.text === 'string' && c.text) {
-      if (role === 'supervisor') {
-        s.appendSupervisor({ kind: 'supervisor', text: c.text, ts: Date.now() });
-      } else {
-        s.appendDeveloper({ kind: 'text', payload: c.text, ts: Date.now() });
-      }
-    } else if (c.type === 'tool_use') {
-      const summary = describeToolUse(c);
-      if (summary) {
-        s.appendDeveloper({ kind: 'tool', payload: summary, ts: Date.now() });
-      }
-    } else if (c.type === 'tool_result') {
-      const text = typeof c.text === 'string' ? c.text : '';
-      const trimmed = text.length > 80 ? `${text.slice(0, 77)}...` : text;
-      if (trimmed) s.appendDeveloper({ kind: 'tool-result', payload: trimmed, ts: Date.now() });
-    }
+  try {
+    await instance.waitUntilExit();
+  } finally {
+    leaveAltScreen();
   }
 }
 
 /**
- * Start the real interactive TUI bound to a live orchestrator.
- *
- * Wires orchestrator events into the TUI store, dispatches user input as
- * either a question/approval reply or a fresh dual-agent turn, and persists
- * session ids across turns. Returns when the TUI exits.
+ * Run interactive TUI bound to a live orchestrator. Wires every orchestrator
+ * event into the store, dispatches user input either to a pending prompt or
+ * as a fresh dual-agent turn, and persists session ids across turns.
  */
 export async function startInteractive(orch: Orchestrator, start: StartResult): Promise<void> {
+  enterAltScreen();
+  const cleanupExit = () => leaveAltScreen();
+  process.once('exit', cleanupExit);
+
   const store = useTuiStore.getState();
   store.setPhase(start.projectState.phase);
+  // Refresh telegram indicator: if a TelegramBridge has been mounted
+  // (caller did this), nothing observable here yet; the bridge sets its own
+  // indicator via the store directly if we want. For now leave default false
+  // — caller can flip if desired.
+
+  // tool_use_id → DevEvent.id, so we can fold tool_result into the same line.
+  const pendingTools = new Map<string, string>();
+  let lastTaskTagged = -1;
 
   // Bridge orchestrator → TUI store
   orch.on('user-question', (q: PendingQuestionView) => {
@@ -120,11 +129,6 @@ export async function startInteractive(orch: Orchestrator, start: StartResult): 
       id: q.id,
       text: q.question,
       options: q.options,
-    });
-    useTuiStore.getState().appendSupervisor({
-      kind: 'system',
-      text: `(asked: ${q.question})`,
-      ts: Date.now(),
     });
   });
   orch.on('user-question-resolved', () => {
@@ -143,16 +147,14 @@ export async function startInteractive(orch: Orchestrator, start: StartResult): 
   orch.on('state-changed', (s: FsmState) => {
     const tui = useTuiStore.getState();
     tui.setFsmState(s);
-    if (s.tag !== 'shutdown') {
-      tui.setPhase(s.phase);
-    }
+    if (s.tag !== 'shutdown') tui.setPhase(s.phase);
     tui.setSupervisorActive(s.tag === 'sup-running');
     tui.setDeveloperActive(s.tag === 'dev-running');
   });
   orch.on('phase-doc-written', (e: { filename: string }) => {
     useTuiStore.getState().appendSupervisor({
-      kind: 'system',
-      text: `(wrote docs/phases/${e.filename})`,
+      kind: 'phase-doc',
+      text: `wrote docs/phases/${e.filename}`,
       ts: Date.now(),
     });
   });
@@ -163,16 +165,69 @@ export async function startInteractive(orch: Orchestrator, start: StartResult): 
   if (start.existing) {
     useTuiStore.getState().appendSupervisor({
       kind: 'system',
-      text: `(resumed existing project at phase ${start.projectState.phase})`,
+      text: `resumed existing project at phase ${start.projectState.phase}`,
       ts: Date.now(),
     });
   } else {
     useTuiStore.getState().appendSupervisor({
       kind: 'system',
-      text: '(new project — type a description to start the discovery conversation)',
+      text: 'new project — type a description to start the discovery conversation',
       ts: Date.now(),
     });
   }
+
+  const onSupervisorEvent = (e: StreamEvent) => {
+    const tui = useTuiStore.getState();
+    if (e.type !== 'assistant') return;
+    const text = extractAssistantText(e);
+    if (!text) return;
+    // Detect TASK_FOR_DEVELOPER blocks. Keep the original text in the sup pane
+    // (so the user sees exactly what the supervisor said), and emit a marker
+    // event into the developer pane summarising each delegated task.
+    const { tasks } = extractDeveloperTasks(text);
+    tui.appendSupervisor({ kind: 'supervisor', text, ts: Date.now() });
+    if (tasks.length > 0 && lastTaskTagged !== tui.currentTurnIndex) {
+      lastTaskTagged = tui.currentTurnIndex;
+      for (const task of tasks) {
+        const firstLine = task.split('\n')[0]!;
+        const head = firstLine.length > 70 ? `${firstLine.slice(0, 67)}…` : firstLine;
+        tui.appendDeveloper({ kind: 'task-marker', summary: `sup→dev: ${head}` });
+      }
+    }
+  };
+
+  const onDeveloperEvent = (e: StreamEvent) => {
+    const tui = useTuiStore.getState();
+    // Tool calls
+    for (const tu of extractToolUses(e)) {
+      const labelInput = describeToolInputForSummary(tu.name, tu.input);
+      const summary = labelInput ? `${tu.name}: ${labelInput}` : tu.name;
+      const eventId = tui.appendDeveloper({
+        kind: 'tool',
+        summary,
+        toolUseId: tu.id,
+        toolName: tu.name,
+        toolInput: tu.input,
+      });
+      pendingTools.set(tu.id, eventId);
+    }
+    // Tool results — fold into the matching tool event
+    for (const tr of extractToolResults(e)) {
+      const eventId = pendingTools.get(tr.toolUseId);
+      if (eventId) {
+        tui.updateDeveloperEvent(eventId, {
+          toolResultText: tr.text,
+          isError: tr.isError,
+        });
+        pendingTools.delete(tr.toolUseId);
+      }
+    }
+    // Plain assistant text from the developer
+    if (e.type === 'assistant') {
+      const t = extractAssistantText(e);
+      if (t) tui.appendDeveloper({ kind: 'text', summary: t });
+    }
+  };
 
   const handleUserInput = (raw: string): void => {
     void onUserInput(raw);
@@ -193,23 +248,24 @@ export async function startInteractive(orch: Orchestrator, start: StartResult): 
       orch.resolveApproval(tui.pendingApproval.id, decision);
       tui.appendSupervisor({
         kind: 'system',
-        text: `(approval ${decision} for ${tui.pendingApproval.action})`,
+        text: `approval ${decision}: ${tui.pendingApproval.action}`,
         ts: Date.now(),
       });
       return;
     }
 
-    // Don't accept new prompts while a turn is running
     if (tui.supervisorActive || tui.developerActive) {
       tui.appendSupervisor({
         kind: 'system',
-        text: '(busy — wait for the current turn to finish)',
+        text: 'busy — wait for the current turn to finish',
         ts: Date.now(),
       });
       return;
     }
 
     tui.appendSupervisor({ kind: 'user', text: trimmed, ts: Date.now() });
+    const turnIndex = tui.bumpTurn();
+    tui.appendDeveloper({ kind: 'turn-marker', summary: `── turn ${turnIndex} ──` });
 
     try {
       const turn = await runDualAgentTurn({
@@ -217,8 +273,8 @@ export async function startInteractive(orch: Orchestrator, start: StartResult): 
         userPrompt: trimmed,
         supervisorSessionId: supervisorSessionId ?? undefined,
         developerSessionId: developerSessionId ?? undefined,
-        onSupervisorEvent: (e) => pumpStreamEventsToTui('supervisor', e),
-        onDeveloperEvent: (e) => pumpStreamEventsToTui('developer', e),
+        onSupervisorEvent,
+        onDeveloperEvent,
       });
       supervisorSessionId = turn.supervisorSessionId ?? supervisorSessionId;
       developerSessionId = turn.developerSessionId ?? developerSessionId;
@@ -234,8 +290,13 @@ export async function startInteractive(orch: Orchestrator, start: StartResult): 
   const instance = render(
     createElement(App, {
       onUserInput: handleUserInput,
-      onExit: () => undefined,
+      onExit: () => leaveAltScreen(),
     }),
   );
-  await instance.waitUntilExit();
+  try {
+    await instance.waitUntilExit();
+  } finally {
+    leaveAltScreen();
+    process.removeListener('exit', cleanupExit);
+  }
 }
