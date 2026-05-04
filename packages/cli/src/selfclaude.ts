@@ -133,11 +133,26 @@ async function runWebMode(opts: {
   console.log(`✓ Web UI: ${browserUrl}`);
 
   let stopping = false;
+  let forceTimer: NodeJS.Timeout | null = null;
+
   const stop = async () => {
     if (stopping) return;
     stopping = true;
+    // Hard fallback — if we can't shut down cleanly within 3s, just exit.
+    forceTimer = setTimeout(() => {
+      console.error('selfclaude: graceful shutdown timed out, forcing exit');
+      process.exit(1);
+    }, 3000);
     try {
       nextProc.kill('SIGTERM');
+      // If next dev clings to SIGTERM, escalate to SIGKILL after a short grace.
+      setTimeout(() => {
+        try {
+          nextProc.kill('SIGKILL');
+        } catch {
+          /* already gone */
+        }
+      }, 1500);
     } catch {
       /* ignore */
     }
@@ -151,8 +166,17 @@ async function runWebMode(opts: {
     } catch {
       /* ignore */
     }
+    if (forceTimer) clearTimeout(forceTimer);
   };
+
+  // Two Ctrl+C presses → immediate exit, even if `stop()` is stuck.
+  let sigintCount = 0;
   process.on('SIGINT', () => {
+    sigintCount += 1;
+    if (sigintCount >= 2) {
+      console.error('selfclaude: second Ctrl+C, exiting now');
+      process.exit(130);
+    }
     void stop().then(() => process.exit(0));
   });
   process.on('SIGTERM', () => {
