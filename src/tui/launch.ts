@@ -15,7 +15,7 @@ import {
   extractToolUses,
   type StreamEvent,
 } from '../orchestrator/stream-parser.js';
-import { runDualAgentTurn } from '../orchestrator/loop.js';
+import { runConversationTurn } from '../orchestrator/conversation.js';
 import { parseApprovalReply } from '../telegram/parser.js';
 import type { FsmState } from '../orchestrator/state-machine.js';
 import { extractDeveloperTasks } from '../orchestrator/tag-parser.js';
@@ -268,7 +268,7 @@ export async function startInteractive(orch: Orchestrator, start: StartResult): 
     tui.appendDeveloper({ kind: 'turn-marker', summary: `── turn ${turnIndex} ──` });
 
     try {
-      const turn = await runDualAgentTurn({
+      const result = await runConversationTurn({
         orchestrator: orch,
         userPrompt: trimmed,
         supervisorSessionId: supervisorSessionId ?? undefined,
@@ -276,8 +276,15 @@ export async function startInteractive(orch: Orchestrator, start: StartResult): 
         onSupervisorEvent,
         onDeveloperEvent,
       });
-      supervisorSessionId = turn.supervisorSessionId ?? supervisorSessionId;
-      developerSessionId = turn.developerSessionId ?? developerSessionId;
+      supervisorSessionId = result.supervisorSessionId ?? supervisorSessionId;
+      developerSessionId = result.developerSessionId ?? developerSessionId;
+      if (result.endedReason === 'max-iterations') {
+        useTuiStore.getState().appendSupervisor({
+          kind: 'system',
+          text: `(stopped after ${result.iterations} iterations — type to continue)`,
+          ts: Date.now(),
+        });
+      }
     } catch (e) {
       useTuiStore.getState().appendSupervisor({
         kind: 'system',
