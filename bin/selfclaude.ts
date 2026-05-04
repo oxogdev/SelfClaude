@@ -103,7 +103,7 @@ program
     }
     if (!env.TELEGRAM_CHAT_ID) {
       console.log('Telegram bridge: token set, chat unpaired.');
-      console.log('  → run `pnpm dev link-telegram` to pair a chat with this install.');
+      console.log('  → run `selfclaude link-telegram` to pair a chat with this install.');
       return;
     }
     const { GrammyTelegramAdapter } = await import('../src/telegram/grammy-adapter.js');

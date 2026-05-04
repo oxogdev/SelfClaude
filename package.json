@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "bin": {
-    "selfclaude": "./dist/bin/selfclaude.js"
+    "selfclaude": "./bin/selfclaude.mjs"
   },
   "scripts": {
     "dev": "tsx bin/selfclaude.ts",
