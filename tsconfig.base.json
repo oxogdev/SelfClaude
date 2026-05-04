@@ -12,13 +12,9 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "outDir": "dist",
-    "rootDir": ".",
     "declaration": false,
     "sourceMap": true,
     "isolatedModules": true,
     "allowImportingTsExtensions": false
-  },
-  "include": ["src/**/*", "bin/**/*", "tests/**/*"],
-  "exclude": ["node_modules", "dist"]
+  }
 }

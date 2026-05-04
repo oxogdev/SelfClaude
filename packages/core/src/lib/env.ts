@@ -1,11 +1,33 @@
 import { config as dotenvConfig } from 'dotenv';
+import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(HERE, '..', '..');
+
+/**
+ * Walk up from `start` until a `pnpm-workspace.yaml` (monorepo root) or `.env`
+ * is found. Falls back to assuming the canonical packages/core/src/lib depth
+ * if neither marker is present.
+ */
+export function findRepoRoot(start: string = HERE): string {
+  let dir = start;
+  while (true) {
+    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir;
+    if (existsSync(join(dir, '.env'))) return dir;
+    if (existsSync(join(dir, '.env.example'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) {
+      // packages/core/src/lib → four levels up to reach monorepo root.
+      return resolve(start, '..', '..', '..', '..');
+    }
+    dir = parent;
+  }
+}
+
+const REPO_ROOT = findRepoRoot();
 export const ENV_PATH = resolve(REPO_ROOT, '.env');
 export const ENV_EXAMPLE_PATH = resolve(REPO_ROOT, '.env.example');
 

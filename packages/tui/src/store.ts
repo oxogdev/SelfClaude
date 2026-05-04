@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { create } from 'zustand';
-import type { FsmState } from '../orchestrator/state-machine.js';
+import type { FsmState } from '@selfclaude/core';
 
 export type ChatLineKind = 'user' | 'supervisor' | 'system' | 'task-tag' | 'phase-doc';
 

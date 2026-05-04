@@ -1,0 +1,20 @@
+{
+  "name": "@selfclaude/core",
+  "version": "0.0.1",
+  "description": "SelfClaude core: orchestrator, hooks, MCP, Telegram, project state, web API",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "test": "tsx --test tests/*.test.ts",
+    "test:integration": "tsx --test tests/integration/*.test.ts",
+    "typecheck": "tsc -p . --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "dotenv": "^16.4.5",
+    "fastify": "^5.0.0",
+    "grammy": "^1.30.0",
+    "zod": "^3.23.8"
+  }
+}

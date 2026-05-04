@@ -1,0 +1,7 @@
+{
+  "name": "@selfclaude/web",
+  "version": "0.0.1",
+  "description": "SelfClaude web UI (Next.js 14 + shadcn) — Phase C placeholder",
+  "private": true,
+  "type": "module"
+}

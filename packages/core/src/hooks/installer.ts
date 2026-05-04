@@ -1,15 +1,17 @@
 import { chmod, copyFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { findRepoRoot } from '../lib/env.js';
 import { log } from '../lib/log.js';
 
 const SCRIPT_FILES = ['stop.sh', 'pretool.sh', 'prompt-inject.sh'] as const;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPTS_SOURCE_DIR = resolve(HERE, 'scripts');
-const REPO_ROOT = resolve(HERE, '..', '..');
+const REPO_ROOT = findRepoRoot(HERE);
 const TSX_BIN = join(REPO_ROOT, 'node_modules', '.bin', 'tsx');
-const MCP_BRIDGE_ENTRY = join(REPO_ROOT, 'src', 'mcp', 'bridge.ts');
+// MCP bridge lives next to us in packages/core/src/mcp/.
+const MCP_BRIDGE_ENTRY = resolve(HERE, '..', 'mcp', 'bridge.ts');
 
 export type ScriptName = (typeof SCRIPT_FILES)[number];
 

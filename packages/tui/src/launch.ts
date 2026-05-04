@@ -3,22 +3,20 @@ import { render } from 'ink';
 import { App } from './App.js';
 import { runDemo } from './demo.js';
 import { useTuiStore } from './store.js';
-import type {
-  Orchestrator,
-  PendingApprovalView,
-  PendingQuestionView,
-  StartResult,
-} from '../orchestrator/index.js';
 import {
   extractAssistantText,
+  extractDeveloperTasks,
   extractToolResults,
   extractToolUses,
+  parseApprovalReply,
+  runConversationTurn,
+  type FsmState,
+  type Orchestrator,
+  type PendingApprovalView,
+  type PendingQuestionView,
+  type StartResult,
   type StreamEvent,
-} from '../orchestrator/stream-parser.js';
-import { runConversationTurn } from '../orchestrator/conversation.js';
-import { parseApprovalReply } from '../telegram/parser.js';
-import type { FsmState } from '../orchestrator/state-machine.js';
-import { extractDeveloperTasks } from '../orchestrator/tag-parser.js';
+} from '@selfclaude/core';
 
 const ALT_SCREEN_ON = '\x1b[?1049h';
 const ALT_SCREEN_OFF = '\x1b[?1049l';

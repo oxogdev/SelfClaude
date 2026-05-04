@@ -1,0 +1,19 @@
+{
+  "name": "@selfclaude/cli",
+  "version": "0.0.1",
+  "description": "SelfClaude CLI entry — selfclaude binary",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "selfclaude": "./selfclaude.mjs"
+  },
+  "scripts": {
+    "dev": "tsx --tsconfig ../../tsconfig.base.json src/selfclaude.ts",
+    "typecheck": "tsc -p . --noEmit"
+  },
+  "dependencies": {
+    "@selfclaude/core": "workspace:*",
+    "@selfclaude/tui": "workspace:*",
+    "commander": "^12.1.0"
+  }
+}
