@@ -1,29 +1,48 @@
 'use client';
 
 import { useState } from 'react';
-import { Send } from 'lucide-react';
+import { Send, StickyNote } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
-export function InputBar({
-  busy,
-  hasPendingQuestion,
-  hasPendingApproval,
-  onSubmit,
-}: {
-  busy: boolean;
-  hasPendingQuestion: boolean;
-  hasPendingApproval: boolean;
+export interface InputBarProps {
+  variant: 'sup' | 'dev';
+  busy?: boolean;
+  hasPendingQuestion?: boolean;
+  hasPendingApproval?: boolean;
   onSubmit: (text: string) => void;
-}) {
+}
+
+export function InputBar({
+  variant,
+  busy = false,
+  hasPendingQuestion = false,
+  hasPendingApproval = false,
+  onSubmit,
+}: InputBarProps) {
   const [text, setText] = useState('');
 
-  const placeholder = hasPendingQuestion
-    ? 'type answer ↵'
-    : hasPendingApproval
-      ? 'y to allow, anything else denies ↵'
-      : busy
-        ? 'working…'
-        : 'message supervisor…';
+  const isSup = variant === 'sup';
+  const placeholder = isSup
+    ? hasPendingQuestion
+      ? 'type answer ↵'
+      : hasPendingApproval
+        ? 'y to allow, anything else denies ↵'
+        : busy
+          ? 'working… (queued for next turn)'
+          : 'message supervisor ↵'
+    : 'note for developer (queued for next dev turn) ↵';
+
+  const ringColor = isSup ? 'focus:border-cyan-600' : 'focus:border-amber-600';
+  const buttonColor = isSup
+    ? 'bg-cyan-600 hover:bg-cyan-500'
+    : 'bg-amber-600 hover:bg-amber-500';
+  const labelText = isSup ? 'sup' : 'dev';
+  const labelColor = isSup ? 'text-cyan-400' : 'text-amber-400';
+
+  // Sup input is disabled while a turn is busy AND no pending Q/A is open
+  // (so user can still answer while busy). Dev input is always available
+  // — notes just queue up for the next dev turn.
+  const disabled = isSup && busy && !hasPendingQuestion && !hasPendingApproval;
 
   const submit = () => {
     const trimmed = text.trim();
@@ -33,7 +52,10 @@ export function InputBar({
   };
 
   return (
-    <div className="border-t border-border bg-bg-panel p-3 flex items-end gap-2">
+    <div className={cn('flex items-end gap-2 border-t border-border bg-bg-panel p-2.5')}>
+      <div className={cn('text-xs font-mono uppercase tracking-wide self-center min-w-[28px]', labelColor)}>
+        {labelText}
+      </div>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -47,26 +69,27 @@ export function InputBar({
           }
         }}
         placeholder={placeholder}
-        disabled={busy && !hasPendingQuestion && !hasPendingApproval}
+        disabled={disabled}
         rows={1}
         className={cn(
-          'flex-1 resize-none bg-bg-subtle border border-border rounded-md px-3 py-2 text-sm',
-          'focus:outline-none focus:border-cyan-600',
+          'flex-1 resize-none bg-bg-subtle border border-border rounded-md px-3 py-1.5 text-sm',
+          'focus:outline-none',
+          ringColor,
           'disabled:opacity-50',
-          'min-h-[36px] max-h-[160px]',
+          'min-h-[32px] max-h-[160px]',
         )}
-        style={{ height: 'auto' }}
       />
       <button
         onClick={submit}
-        disabled={!text.trim() || (busy && !hasPendingQuestion && !hasPendingApproval)}
+        disabled={!text.trim() || disabled}
         className={cn(
-          'shrink-0 rounded-md bg-cyan-600 hover:bg-cyan-500 px-3 py-2 text-white',
+          'shrink-0 rounded-md px-3 py-1.5 text-white',
+          buttonColor,
           'disabled:opacity-40 disabled:cursor-not-allowed',
         )}
-        aria-label="send"
+        aria-label={isSup ? 'send to supervisor' : 'note to developer'}
       >
-        <Send size={16} />
+        {isSup ? <Send size={14} /> : <StickyNote size={14} />}
       </button>
     </div>
   );

@@ -75,6 +75,19 @@ export function buildWebApi(manager: SessionManager): FastifyInstance {
     }
   });
 
+  server.post('/api/sessions/:id/dev-note', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const Schema = z.object({ text: z.string().min(1) });
+    const parsed = Schema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
+    try {
+      await manager.noteForDeveloper(id, parsed.data.text);
+      return reply.code(202).send({ accepted: true });
+    } catch (e) {
+      return reply.code(400).send({ error: (e as Error).message });
+    }
+  });
+
   server.post('/api/sessions/:id/answer-question', async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const Schema = z.object({ questionId: z.string(), answer: z.string() });

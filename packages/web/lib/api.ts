@@ -47,6 +47,12 @@ export const api = {
       body: JSON.stringify({ text }),
     });
   },
+  sendDevNote(id: string, text: string) {
+    return jsonFetch<{ accepted: boolean }>(`/api/sessions/${id}/dev-note`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    });
+  },
   answerQuestion(id: string, questionId: string, answer: string) {
     return jsonFetch<{ ok: boolean }>(`/api/sessions/${id}/answer-question`, {
       method: 'POST',

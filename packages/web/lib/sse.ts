@@ -34,6 +34,7 @@ export function subscribeSession(
     'iteration-end',
     'error',
     'turn-busy',
+    'user-note-dev',
   ];
 
   for (const kind of kinds) {

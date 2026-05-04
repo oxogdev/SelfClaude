@@ -51,19 +51,27 @@ export default function SessionPage() {
     };
   }, [id, setSnapshot, applyEvent, setActive]);
 
-  const handleUserSubmit = async (text: string) => {
+  const handleSupSubmit = async (text: string) => {
     if (!session) return;
-    if (session.pendingQuestion) {
-      await api.answerQuestion(id, session.pendingQuestion.id, text);
-      return;
-    }
-    if (session.pendingApproval) {
-      const decision = /^y(es)?$/i.test(text.trim()) ? 'allow' : 'deny';
-      await api.decideApproval(id, session.pendingApproval.id, decision);
-      return;
-    }
     try {
+      if (session.pendingQuestion) {
+        await api.answerQuestion(id, session.pendingQuestion.id, text);
+        return;
+      }
+      if (session.pendingApproval) {
+        const decision = /^y(es)?$/i.test(text.trim()) ? 'allow' : 'deny';
+        await api.decideApproval(id, session.pendingApproval.id, decision);
+        return;
+      }
       await api.sendMessage(id, text);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const handleDevSubmit = async (text: string) => {
+    try {
+      await api.sendDevNote(id, text);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -87,11 +95,14 @@ export default function SessionPage() {
     return <div className="p-8 text-zinc-500">Loading session…</div>;
   }
 
+  const supWidth = '32%';
+  const detailWidth = '28%';
+
   return (
     <div className="flex flex-col h-screen bg-bg">
       <StatusBar meta={session.meta} busy={session.busy} />
       <div className="flex-1 flex min-h-0">
-        <div className="w-[32%] min-w-[320px] border-r border-border flex flex-col">
+        <div style={{ width: supWidth, minWidth: 320 }} className="border-r border-border flex flex-col">
           <SupChat chatLog={session.chatLog} />
         </div>
         <div className="flex-1 border-r border-border flex flex-col">
@@ -101,7 +112,7 @@ export default function SessionPage() {
             onSelectTool={(t) => selectTool(id, t)}
           />
         </div>
-        <div className="w-[28%] min-w-[280px] flex flex-col">
+        <div style={{ width: detailWidth, minWidth: 280 }} className="flex flex-col">
           <ToolDetail
             chatLog={session.chatLog}
             selectedToolUseId={session.selectedToolUseId}
@@ -114,12 +125,20 @@ export default function SessionPage() {
         onAnswer={(qid, answer) => api.answerQuestion(id, qid, answer)}
         onDecide={(aid, decision) => api.decideApproval(id, aid, decision)}
       />
-      <InputBar
-        busy={session.busy}
-        hasPendingQuestion={!!session.pendingQuestion}
-        hasPendingApproval={!!session.pendingApproval}
-        onSubmit={handleUserSubmit}
-      />
+      <div className="flex border-t border-border">
+        <div style={{ width: supWidth, minWidth: 320 }} className="border-r border-border">
+          <InputBar
+            variant="sup"
+            busy={session.busy}
+            hasPendingQuestion={!!session.pendingQuestion}
+            hasPendingApproval={!!session.pendingApproval}
+            onSubmit={handleSupSubmit}
+          />
+        </div>
+        <div className="flex-1">
+          <InputBar variant="dev" onSubmit={handleDevSubmit} />
+        </div>
+      </div>
     </div>
   );
 }

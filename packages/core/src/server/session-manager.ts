@@ -51,7 +51,8 @@ export type SessionEvent =
   | { kind: 'approval-resolved'; id: string; decision: 'allow' | 'deny' }
   | { kind: 'iteration-end'; iteration: number }
   | { kind: 'error'; message: string }
-  | { kind: 'turn-busy'; busy: boolean };
+  | { kind: 'turn-busy'; busy: boolean }
+  | { kind: 'user-note-dev'; text: string; ts: number };
 
 export interface SessionContext {
   id: string;
@@ -158,6 +159,27 @@ export class SessionManager extends EventEmitter {
       }
     })();
     ctx.busy = run;
+  }
+
+  /**
+   * Drop a user-authored note into the developer's inbox without triggering
+   * a turn. The next time the developer agent runs, the note arrives via the
+   * UserPromptSubmit hook injection, alongside any supervisor-routed task.
+   * This lets the user steer the developer directly (e.g. "be careful with
+   * that file", "use port 4000 instead") without interrupting the
+   * supervisor's planning.
+   */
+  async noteForDeveloper(id: string, text: string): Promise<void> {
+    const ctx = this.sessions.get(id);
+    if (!ctx) throw new Error(`session not found: ${id}`);
+    const ts = Date.now();
+    ctx.orchestrator.messages.enqueue({
+      to: 'developer',
+      source: 'user',
+      body: `USER_NOTE_FOR_DEVELOPER:\n${text}`,
+    });
+    await this.appendLog(ctx, { type: 'user-note-dev', text, ts });
+    this.emitEvent(ctx, { kind: 'user-note-dev', text, ts });
   }
 
   async resolveQuestion(id: string, questionId: string, answer: string): Promise<boolean> {

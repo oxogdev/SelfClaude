@@ -150,6 +150,12 @@ export const useSessionStore = create<MultiSessionState>((set) => ({
             };
           }
           break;
+        case 'user-note-dev':
+          next = {
+            ...cur,
+            chatLog: append(cur.chatLog, { type: 'user-note-dev', text: event.text, ts }),
+          };
+          break;
         case 'iteration-end':
         case 'error':
           // No-op for state; could surface via toast in UI.
