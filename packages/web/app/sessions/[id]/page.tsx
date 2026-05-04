@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { TabBar } from '@/components/tab-bar';
 import { StatusBar } from '@/components/status-bar';
 import { SupChat } from '@/components/sup-chat';
 import { DevTimeline } from '@/components/dev-timeline';
@@ -100,6 +101,7 @@ export default function SessionPage() {
 
   return (
     <div className="flex flex-col h-screen bg-bg">
+      <TabBar />
       <StatusBar meta={session.meta} busy={session.busy} />
       <div className="flex-1 flex min-h-0">
         <div style={{ width: supWidth, minWidth: 320 }} className="border-r border-border flex flex-col">

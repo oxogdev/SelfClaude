@@ -5,6 +5,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { SessionManager } from './session-manager.js';
 import { streamSseFromEmitter } from './sse.js';
+import { addFavorite, listFavorites, removeFavorite } from './favorites.js';
 import { log } from '../lib/log.js';
 
 export interface WebApiOptions {
@@ -116,6 +117,24 @@ export function buildWebApi(manager: SessionManager): FastifyInstance {
       return reply.code(404).send({ error: 'session not found' });
     }
     streamSseFromEmitter(reply, ctx.emitter);
+  });
+
+  server.get('/api/favorites', async () => ({ favorites: listFavorites() }));
+
+  server.post('/api/favorites', async (req, reply) => {
+    const Schema = z.object({ cwd: z.string().min(1), label: z.string().optional() });
+    const parsed = Schema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
+    const fav = addFavorite(parsed.data.cwd, parsed.data.label);
+    return fav;
+  });
+
+  server.delete('/api/favorites', async (req, reply) => {
+    const Schema = z.object({ cwd: z.string().min(1) });
+    const parsed = Schema.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
+    const removed = removeFavorite(parsed.data.cwd);
+    return { removed };
   });
 
   server.get('/api/browse', async (req, reply) => {

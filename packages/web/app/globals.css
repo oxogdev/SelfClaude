@@ -10,6 +10,9 @@
   body,
   #__next {
     height: 100%;
+    overscroll-behavior: none;
+    -ms-scroll-chaining: none;
+    scroll-behavior: smooth;
   }
   body {
     @apply bg-bg text-zinc-100 antialiased;

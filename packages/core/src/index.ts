@@ -126,3 +126,11 @@ export {
 } from './server/web-api.js';
 
 export { streamSseFromEmitter } from './server/sse.js';
+
+export {
+  addFavorite,
+  listFavorites,
+  removeFavorite,
+  FavoriteSchema,
+  type Favorite,
+} from './server/favorites.js';

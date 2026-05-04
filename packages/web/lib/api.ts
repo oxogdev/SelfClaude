@@ -1,4 +1,4 @@
-import type { BrowseResult, SessionMeta, SessionSnapshot } from './types';
+import type { BrowseResult, Favorite, SessionMeta, SessionSnapshot } from './types';
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -68,5 +68,20 @@ export const api = {
   browse(path?: string) {
     const q = path ? `?path=${encodeURIComponent(path)}` : '';
     return jsonFetch<BrowseResult>(`/api/browse${q}`);
+  },
+  listFavorites() {
+    return jsonFetch<{ favorites: Favorite[] }>('/api/favorites');
+  },
+  addFavorite(cwd: string, label?: string) {
+    return jsonFetch<Favorite>('/api/favorites', {
+      method: 'POST',
+      body: JSON.stringify({ cwd, label }),
+    });
+  },
+  removeFavorite(cwd: string) {
+    return jsonFetch<{ removed: boolean }>(
+      `/api/favorites?cwd=${encodeURIComponent(cwd)}`,
+      { method: 'DELETE' },
+    );
   },
 };

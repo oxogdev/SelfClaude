@@ -37,6 +37,12 @@ export interface BrowseResult {
   entries: { name: string; isDir: boolean; isHidden: boolean }[];
 }
 
+export interface Favorite {
+  cwd: string;
+  label: string;
+  pinnedAt: number;
+}
+
 // Chat-log entry types (match packages/core/src/project/chat-log.ts).
 export type ChatLogEntry =
   | { type: 'user-message'; text: string; ts: number }
