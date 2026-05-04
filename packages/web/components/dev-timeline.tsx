@@ -8,10 +8,12 @@ import type { ChatLogEntry } from '@/lib/types';
 export function DevTimeline({
   chatLog,
   selectedToolUseId,
+  streamingTs,
   onSelectTool,
 }: {
   chatLog: ChatLogEntry[];
   selectedToolUseId: string | null;
+  streamingTs: number | null;
   onSelectTool: (toolUseId: string | null) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -71,13 +73,17 @@ export function DevTimeline({
           );
         }
         if (item.kind === 'text') {
+          const isStreaming = item.ts === streamingTs;
           return (
             <div
               key={item.key}
               className="flex items-start gap-2 px-2 py-1 text-sm text-zinc-200"
             >
               <MessageSquare size={14} className="text-zinc-500 mt-1 shrink-0" />
-              <p className="whitespace-pre-wrap leading-relaxed">{item.text}</p>
+              <p className="whitespace-pre-wrap leading-relaxed">
+                {item.text}
+                {isStreaming && <span className="streaming-cursor" />}
+              </p>
             </div>
           );
         }
@@ -137,7 +143,7 @@ type TimelineItem =
       result?: string;
       isError?: boolean;
     }
-  | { kind: 'text'; key: string; text: string }
+  | { kind: 'text'; key: string; text: string; ts: number }
   | { kind: 'task-marker'; key: string; summary: string }
   | { kind: 'phase-doc'; key: string; filename: string }
   | { kind: 'user-note'; key: string; text: string }
@@ -164,7 +170,7 @@ function buildItems(chatLog: ChatLogEntry[]): TimelineItem[] {
         tool.isError = entry.isError;
       }
     } else if (entry.type === 'dev-text') {
-      out.push({ kind: 'text', key: `${entry.ts}-text`, text: entry.text });
+      out.push({ kind: 'text', key: `${entry.ts}-text`, text: entry.text, ts: entry.ts });
     } else if (entry.type === 'task-marker') {
       out.push({ kind: 'task-marker', key: `${entry.ts}-task`, summary: entry.summary });
     } else if (entry.type === 'phase-doc-written') {

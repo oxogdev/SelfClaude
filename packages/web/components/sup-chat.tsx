@@ -4,7 +4,13 @@ import { useEffect, useRef } from 'react';
 import { cn } from '@/lib/cn';
 import type { ChatLogEntry } from '@/lib/types';
 
-export function SupChat({ chatLog }: { chatLog: ChatLogEntry[] }) {
+export function SupChat({
+  chatLog,
+  streamingTs,
+}: {
+  chatLog: ChatLogEntry[];
+  streamingTs: number | null;
+}) {
   const ref = useRef<HTMLDivElement>(null);
 
   // Filter to supervisor-pane-relevant entries.
@@ -18,7 +24,7 @@ export function SupChat({ chatLog }: { chatLog: ChatLogEntry[] }) {
 
   useEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [lines.length]);
+  }, [lines.length, chatLog]);
 
   return (
     <div
@@ -31,13 +37,17 @@ export function SupChat({ chatLog }: { chatLog: ChatLogEntry[] }) {
         </p>
       )}
       {lines.map((entry, idx) => (
-        <Bubble key={`${entry.ts}-${idx}`} entry={entry} />
+        <Bubble
+          key={`${entry.ts}-${idx}`}
+          entry={entry}
+          streaming={entry.type === 'sup-message' && entry.ts === streamingTs}
+        />
       ))}
     </div>
   );
 }
 
-function Bubble({ entry }: { entry: ChatLogEntry }) {
+function Bubble({ entry, streaming = false }: { entry: ChatLogEntry; streaming?: boolean }) {
   if (entry.type === 'user-message') {
     return (
       <div className="flex justify-end">
@@ -55,6 +65,7 @@ function Bubble({ entry }: { entry: ChatLogEntry }) {
           <div className="text-xs text-zinc-400 mb-0.5">supervisor</div>
           <p className={cn('whitespace-pre-wrap', containsTaskTag(entry.text) && 'text-zinc-300')}>
             {entry.text}
+            {streaming && <span className="streaming-cursor" />}
           </p>
         </div>
       </div>

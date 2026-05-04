@@ -16,6 +16,10 @@ export interface SessionState {
   pendingApproval: PendingApproval | null;
   selectedToolUseId: string | null;
   busy: boolean;
+  /** Timestamp of the currently-streaming sup bubble (null when settled). */
+  streamingSupTs: number | null;
+  /** Timestamp of the currently-streaming dev bubble (null when settled). */
+  streamingDevTs: number | null;
 }
 
 interface MultiSessionState {
@@ -37,6 +41,8 @@ const empty: SessionState = {
   pendingApproval: null,
   selectedToolUseId: null,
   busy: false,
+  streamingSupTs: null,
+  streamingDevTs: null,
 };
 
 const HISTORY_LIMIT = 1000;
@@ -87,9 +93,13 @@ export const useSessionStore = create<MultiSessionState>((set) => ({
           const last = cur.chatLog[cur.chatLog.length - 1];
           if (last?.type === 'sup-message' && Math.abs(last.ts - ts) < 60_000) {
             const updated: ChatLogEntry = { ...last, text: event.text };
-            next = { ...cur, chatLog: [...cur.chatLog.slice(0, -1), updated] };
+            next = { ...cur, chatLog: [...cur.chatLog.slice(0, -1), updated], streamingSupTs: null };
           } else {
-            next = { ...cur, chatLog: append(cur.chatLog, { type: 'sup-message', text: event.text, ts }) };
+            next = {
+              ...cur,
+              chatLog: append(cur.chatLog, { type: 'sup-message', text: event.text, ts }),
+              streamingSupTs: null,
+            };
           }
           break;
         }
@@ -97,9 +107,13 @@ export const useSessionStore = create<MultiSessionState>((set) => ({
           const last = cur.chatLog[cur.chatLog.length - 1];
           if (last?.type === 'dev-text' && Math.abs(last.ts - ts) < 60_000) {
             const updated: ChatLogEntry = { ...last, text: event.text };
-            next = { ...cur, chatLog: [...cur.chatLog.slice(0, -1), updated] };
+            next = { ...cur, chatLog: [...cur.chatLog.slice(0, -1), updated], streamingDevTs: null };
           } else {
-            next = { ...cur, chatLog: append(cur.chatLog, { type: 'dev-text', text: event.text, ts }) };
+            next = {
+              ...cur,
+              chatLog: append(cur.chatLog, { type: 'dev-text', text: event.text, ts }),
+              streamingDevTs: null,
+            };
           }
           break;
         }
@@ -151,7 +165,11 @@ export const useSessionStore = create<MultiSessionState>((set) => ({
           next = { ...cur, pendingApproval: null };
           break;
         case 'turn-busy':
-          next = { ...cur, busy: event.busy };
+          // When a turn ends, also clear streaming markers in case the final
+          // sup-message/dev-text never arrived (defensive).
+          next = event.busy
+            ? { ...cur, busy: true }
+            : { ...cur, busy: false, streamingSupTs: null, streamingDevTs: null };
           break;
         case 'state-changed':
           if (cur.meta) {
@@ -179,17 +197,19 @@ export const useSessionStore = create<MultiSessionState>((set) => ({
           };
           break;
         case 'sup-message-delta': {
-          // Append delta into the last sup-message bubble (creating one if
-          // the previous entry isn't a sup-message). Ephemeral state — the
-          // final 'sup-message' event below replaces with the full text.
           const last = cur.chatLog[cur.chatLog.length - 1];
           if (last?.type === 'sup-message') {
             const updated: ChatLogEntry = { ...last, text: last.text + event.delta };
-            next = { ...cur, chatLog: [...cur.chatLog.slice(0, -1), updated] };
+            next = {
+              ...cur,
+              chatLog: [...cur.chatLog.slice(0, -1), updated],
+              streamingSupTs: last.ts,
+            };
           } else {
             next = {
               ...cur,
               chatLog: append(cur.chatLog, { type: 'sup-message', text: event.delta, ts }),
+              streamingSupTs: ts,
             };
           }
           break;
@@ -198,11 +218,16 @@ export const useSessionStore = create<MultiSessionState>((set) => ({
           const last = cur.chatLog[cur.chatLog.length - 1];
           if (last?.type === 'dev-text') {
             const updated: ChatLogEntry = { ...last, text: last.text + event.delta };
-            next = { ...cur, chatLog: [...cur.chatLog.slice(0, -1), updated] };
+            next = {
+              ...cur,
+              chatLog: [...cur.chatLog.slice(0, -1), updated],
+              streamingDevTs: last.ts,
+            };
           } else {
             next = {
               ...cur,
               chatLog: append(cur.chatLog, { type: 'dev-text', text: event.delta, ts }),
+              streamingDevTs: ts,
             };
           }
           break;

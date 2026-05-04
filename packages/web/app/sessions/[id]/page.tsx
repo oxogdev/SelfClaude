@@ -105,12 +105,13 @@ export default function SessionPage() {
       <StatusBar meta={session.meta} busy={session.busy} />
       <div className="flex-1 flex min-h-0">
         <div style={{ width: supWidth, minWidth: 320 }} className="border-r border-border flex flex-col">
-          <SupChat chatLog={session.chatLog} />
+          <SupChat chatLog={session.chatLog} streamingTs={session.streamingSupTs} />
         </div>
         <div className="flex-1 border-r border-border flex flex-col">
           <DevTimeline
             chatLog={session.chatLog}
             selectedToolUseId={session.selectedToolUseId}
+            streamingTs={session.streamingDevTs}
             onSelectTool={(t) => selectTool(id, t)}
           />
         </div>
