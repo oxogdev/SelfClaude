@@ -11,21 +11,41 @@ program
 
 program
   .command('start', { isDefault: true })
-  .description('Start the orchestrator in the current working directory')
-  .option('--demo', 'Render the TUI with synthetic events (no real claude subprocess)')
-  .option('--tui', 'Use the legacy Ink TUI instead of the (upcoming) web UI')
-  .option('--cwd <dir>', 'Working directory the orchestrator operates in')
-  .action(async (opts: { demo?: boolean; tui?: boolean; cwd?: string }) => {
-    if (opts.demo) {
-      const { startDemo } = await import('@selfclaude/tui');
-      await startDemo();
-      return;
-    }
+  .description('Start the orchestrator (web UI by default; legacy TUI via --tui)')
+  .option('--demo', 'Render the legacy TUI with synthetic events (no real claude subprocess)')
+  .option('--tui', 'Use the legacy Ink TUI instead of the web UI')
+  .option('--web', 'Force web UI (default when --tui/--demo are absent)')
+  .option('--no-open', "Don't auto-open the browser when starting in web mode")
+  .option('--port <port>', 'Web API port (web mode only)', '7423')
+  .option('--web-port <port>', 'Next.js dev server port (web mode only)', '3000')
+  .option('--cwd <dir>', 'Working directory the orchestrator operates in (TUI mode only)')
+  .action(
+    async (opts: {
+      demo?: boolean;
+      tui?: boolean;
+      web?: boolean;
+      open?: boolean;
+      port?: string;
+      webPort?: string;
+      cwd?: string;
+    }) => {
+      if (opts.demo) {
+        const { startDemo } = await import('@selfclaude/tui');
+        await startDemo();
+        return;
+      }
 
-    // For now, all non-demo flows still run the legacy TUI. The web UI lands
-    // in Phase C; this branch will switch to launching the WebAPI + browser
-    // when --tui is omitted. `--tui` will remain as the explicit fallback.
-    const cwd = opts.cwd ? resolve(opts.cwd) : process.cwd();
+      // Default to web UI; --tui is the explicit legacy fallback.
+      if (!opts.tui) {
+        await runWebMode({
+          apiPort: Number(opts.port ?? 7423),
+          nextPort: Number(opts.webPort ?? 3000),
+          openBrowser: opts.open !== false,
+        });
+        return;
+      }
+
+      const cwd = opts.cwd ? resolve(opts.cwd) : process.cwd();
     const {
       Orchestrator,
       TelegramBridge,
@@ -74,7 +94,74 @@ program
     } finally {
       await stop();
     }
+    },
+  );
+
+async function runWebMode(opts: {
+  apiPort: number;
+  nextPort: number;
+  openBrowser: boolean;
+}): Promise<void> {
+  const { spawn } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const { dirname, resolve: pathResolve } = await import('node:path');
+  const { findRepoRoot, startWebApi } = await import('@selfclaude/core');
+
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const REPO_ROOT = findRepoRoot(HERE);
+  const WEB_DIR = pathResolve(REPO_ROOT, 'packages', 'web');
+  const NEXT_BIN = pathResolve(WEB_DIR, 'node_modules', '.bin', 'next');
+
+  const api = await startWebApi({ port: opts.apiPort });
+  console.log(`✓ SelfClaude Web API: ${api.url}`);
+
+  const nextProc = spawn(NEXT_BIN, ['dev', '--port', String(opts.nextPort)], {
+    stdio: 'inherit',
+    cwd: WEB_DIR,
   });
+
+  const browserUrl = `http://127.0.0.1:${opts.nextPort}/`;
+  if (opts.openBrowser) {
+    setTimeout(() => {
+      try {
+        spawn('open', [browserUrl], { detached: true, stdio: 'ignore' }).unref();
+      } catch {
+        /* best effort */
+      }
+    }, 3500);
+  }
+  console.log(`✓ Web UI: ${browserUrl}`);
+
+  let stopping = false;
+  const stop = async () => {
+    if (stopping) return;
+    stopping = true;
+    try {
+      nextProc.kill('SIGTERM');
+    } catch {
+      /* ignore */
+    }
+    try {
+      await api.server.close();
+    } catch {
+      /* ignore */
+    }
+    try {
+      await api.manager.destroyAll();
+    } catch {
+      /* ignore */
+    }
+  };
+  process.on('SIGINT', () => {
+    void stop().then(() => process.exit(0));
+  });
+  process.on('SIGTERM', () => {
+    void stop().then(() => process.exit(0));
+  });
+  nextProc.on('exit', (code) => {
+    void stop().then(() => process.exit(code ?? 0));
+  });
+}
 
 program
   .command('link-telegram')
