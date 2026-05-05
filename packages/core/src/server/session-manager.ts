@@ -69,6 +69,9 @@ export interface SessionContext {
   supervisorSessionId: string | null;
   developerSessionId: string | null;
   busy: Promise<void> | null;
+  /** Token-delta counters per role, reset on assistant-complete events. */
+  supDeltaCount: number;
+  devDeltaCount: number;
 }
 
 export interface SessionSnapshot {
@@ -104,6 +107,8 @@ export class SessionManager extends EventEmitter {
       supervisorSessionId: startResult.projectState.supervisorSessionId,
       developerSessionId: startResult.projectState.developerSessionId,
       busy: null,
+      supDeltaCount: 0,
+      devDeltaCount: 0,
     };
     this.sessions.set(id, ctx);
     this.attachOrchestratorEvents(ctx);
@@ -361,16 +366,21 @@ export class SessionManager extends EventEmitter {
 
   private onSupervisorStreamEvent(ctx: SessionContext, e: StreamEvent): void {
     const ts = Date.now();
-    // Token-level delta (only with --include-partial-messages). Ephemeral —
-    // chat-log gets the full text on the final assistant event below.
     const delta = extractStreamTextDelta(e);
     if (delta) {
+      ctx.supDeltaCount += 1;
       this.emitEvent(ctx, { kind: 'sup-message-delta', delta, ts });
       return;
     }
     if (e.type !== 'assistant') return;
     const text = extractAssistantText(e);
     if (!text) return;
+    log('info', 'sup.message.assembled', {
+      id: ctx.id,
+      deltas: ctx.supDeltaCount,
+      chars: text.length,
+    });
+    ctx.supDeltaCount = 0;
     void this.appendLog(ctx, { type: 'sup-message', text, ts });
     this.emitEvent(ctx, { kind: 'sup-message', text, ts });
     const { tasks } = extractDeveloperTasks(text);
@@ -386,6 +396,7 @@ export class SessionManager extends EventEmitter {
     const ts = Date.now();
     const delta = extractStreamTextDelta(e);
     if (delta) {
+      ctx.devDeltaCount += 1;
       this.emitEvent(ctx, { kind: 'dev-text-delta', delta, ts });
       return;
     }
@@ -427,6 +438,12 @@ export class SessionManager extends EventEmitter {
     if (e.type === 'assistant') {
       const text = extractAssistantText(e);
       if (text) {
+        log('info', 'dev.text.assembled', {
+          id: ctx.id,
+          deltas: ctx.devDeltaCount,
+          chars: text.length,
+        });
+        ctx.devDeltaCount = 0;
         void this.appendLog(ctx, { type: 'dev-text', text, ts });
         this.emitEvent(ctx, { kind: 'dev-text', text, ts });
       }

@@ -2,14 +2,17 @@
 
 import { useEffect, useRef } from 'react';
 import { cn } from '@/lib/cn';
+import { AgentStatus, type AgentStatusInfo } from './agent-status';
 import type { ChatLogEntry } from '@/lib/types';
 
 export function SupChat({
   chatLog,
   streamingTs,
+  status,
 }: {
   chatLog: ChatLogEntry[];
   streamingTs: number | null;
+  status: AgentStatusInfo | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -19,7 +22,7 @@ export function SupChat({
       e.type === 'user-message' ||
       e.type === 'sup-message' ||
       e.type === 'phase-doc-written' ||
-      (e.type === 'iteration-end' && false), // hide iteration-end from sup pane
+      (e.type === 'iteration-end' && false),
   );
 
   useEffect(() => {
@@ -27,22 +30,25 @@ export function SupChat({
   }, [lines.length, chatLog]);
 
   return (
-    <div
-      ref={ref}
-      className="h-full overflow-y-auto scrollbar-thin px-4 py-3 space-y-3"
-    >
-      {lines.length === 0 && (
-        <p className="text-sm text-zinc-500 italic">
-          No messages yet. Type below to start a discovery conversation.
-        </p>
-      )}
-      {lines.map((entry, idx) => (
-        <Bubble
-          key={`${entry.ts}-${idx}`}
-          entry={entry}
-          streaming={entry.type === 'sup-message' && entry.ts === streamingTs}
-        />
-      ))}
+    <div className="h-full flex flex-col">
+      <div
+        ref={ref}
+        className="flex-1 overflow-y-auto scrollbar-thin px-3 py-2.5 space-y-2"
+      >
+        {lines.length === 0 && (
+          <p className="text-xs text-zinc-500 italic">
+            No messages yet. Type below to start a discovery conversation.
+          </p>
+        )}
+        {lines.map((entry, idx) => (
+          <Bubble
+            key={`${entry.ts}-${idx}`}
+            entry={entry}
+            streaming={entry.type === 'sup-message' && entry.ts === streamingTs}
+          />
+        ))}
+      </div>
+      <AgentStatus status={status} variant="sup" />
     </div>
   );
 }
@@ -51,8 +57,8 @@ function Bubble({ entry, streaming = false }: { entry: ChatLogEntry; streaming?:
   if (entry.type === 'user-message') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-2xl rounded-tr-md bg-magenta-600 bg-cyan-600/20 border border-cyan-700/40 px-4 py-2 text-sm">
-          <div className="text-xs text-cyan-300/80 mb-0.5">you</div>
+        <div className="max-w-[80%] rounded-xl rounded-tr-sm bg-cyan-600/20 border border-cyan-700/40 px-3 py-1.5 text-[13px] leading-snug">
+          <div className="text-[10px] text-cyan-300/80 mb-0.5 uppercase tracking-wide">you</div>
           <p className="whitespace-pre-wrap">{entry.text}</p>
         </div>
       </div>
@@ -61,8 +67,8 @@ function Bubble({ entry, streaming = false }: { entry: ChatLogEntry; streaming?:
   if (entry.type === 'sup-message') {
     return (
       <div className="flex justify-start">
-        <div className="max-w-[85%] rounded-2xl rounded-tl-md bg-bg-elevated border border-border px-4 py-2 text-sm">
-          <div className="text-xs text-zinc-400 mb-0.5">supervisor</div>
+        <div className="max-w-[88%] rounded-xl rounded-tl-sm bg-bg-elevated border border-border px-3 py-1.5 text-[13px] leading-snug">
+          <div className="text-[10px] text-zinc-400 mb-0.5 uppercase tracking-wide">supervisor</div>
           <p className={cn('whitespace-pre-wrap', containsTaskTag(entry.text) && 'text-zinc-300')}>
             {entry.text}
             {streaming && <span className="streaming-cursor" />}
@@ -73,7 +79,7 @@ function Bubble({ entry, streaming = false }: { entry: ChatLogEntry; streaming?:
   }
   if (entry.type === 'phase-doc-written') {
     return (
-      <div className="text-xs text-emerald-500 italic px-2">
+      <div className="text-[11px] text-emerald-500 italic px-2">
         📄 wrote docs/phases/{entry.filename}
       </div>
     );

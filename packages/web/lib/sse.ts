@@ -44,6 +44,18 @@ export function subscribeSession(
     es.addEventListener(kind, (ev: MessageEvent) => {
       try {
         const parsed = JSON.parse(ev.data) as SessionEvent;
+        if (
+          typeof window !== 'undefined' &&
+          (kind === 'sup-message-delta' || kind === 'dev-text-delta')
+        ) {
+          // Surfacing delta arrival in DevTools makes it easy to verify
+          // streaming is wired end-to-end.
+          // eslint-disable-next-line no-console
+          console.debug(
+            `[sse] ${kind}`,
+            (parsed as { delta?: string }).delta?.slice(0, 60) ?? '',
+          );
+        }
         handler(parsed);
       } catch {
         /* ignore malformed event */

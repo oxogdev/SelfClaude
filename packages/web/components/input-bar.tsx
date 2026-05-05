@@ -53,8 +53,13 @@ export function InputBar({
   };
 
   return (
-    <div className={cn('flex items-end gap-2 border-t border-border bg-bg-panel p-2.5')}>
-      <div className={cn('text-xs font-mono uppercase tracking-wide self-center min-w-[28px]', labelColor)}>
+    <div className={cn('flex items-end gap-1.5 border-t border-border bg-bg-panel p-1.5')}>
+      <div
+        className={cn(
+          'text-[10px] font-mono uppercase tracking-wide self-center min-w-[22px]',
+          labelColor,
+        )}
+      >
         {labelText}
       </div>
       <textarea
@@ -73,24 +78,24 @@ export function InputBar({
         disabled={disabled}
         rows={1}
         className={cn(
-          'flex-1 resize-none bg-bg-subtle border border-border rounded-md px-3 py-1.5 text-sm',
+          'flex-1 resize-none bg-bg-subtle border border-border rounded px-2 py-1 text-[12px] leading-snug',
           'focus:outline-none',
           ringColor,
           'disabled:opacity-50',
-          'min-h-[32px] max-h-[160px]',
+          'min-h-[26px] max-h-[140px]',
         )}
       />
       <button
         onClick={submit}
         disabled={!text.trim() || disabled}
         className={cn(
-          'shrink-0 rounded-md px-3 py-1.5 text-white',
+          'shrink-0 rounded px-2.5 py-1 text-white',
           buttonColor,
           'disabled:opacity-40 disabled:cursor-not-allowed',
         )}
         aria-label={isSup ? 'send to supervisor' : 'send to developer'}
       >
-        <Send size={14} />
+        <Send size={13} />
       </button>
     </div>
   );

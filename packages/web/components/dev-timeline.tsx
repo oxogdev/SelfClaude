@@ -3,37 +3,36 @@
 import { useEffect, useRef } from 'react';
 import { Wrench, MessageSquare, FileText, Compass } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { AgentStatus, type AgentStatusInfo } from './agent-status';
 import type { ChatLogEntry } from '@/lib/types';
 
 export function DevTimeline({
   chatLog,
   selectedToolUseId,
   streamingTs,
+  status,
   onSelectTool,
 }: {
   chatLog: ChatLogEntry[];
   selectedToolUseId: string | null;
   streamingTs: number | null;
+  status: AgentStatusInfo | null;
   onSelectTool: (toolUseId: string | null) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
-  // Pair tool_use ↔ tool_result entries by toolUseId so each tool renders as
-  // a single card with status.
   const items = buildItems(chatLog);
 
   useEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [items.length]);
+  }, [items.length, chatLog]);
 
   return (
-    <div
-      ref={ref}
-      className="h-full overflow-y-auto scrollbar-thin px-3 py-3 space-y-2"
-    >
-      {items.length === 0 && (
-        <p className="text-sm text-zinc-500 italic px-2">No developer activity yet.</p>
-      )}
+    <div className="h-full flex flex-col">
+      <div ref={ref} className="flex-1 overflow-y-auto scrollbar-thin px-3 py-2.5 space-y-1.5">
+        {items.length === 0 && (
+          <p className="text-xs text-zinc-500 italic px-2">No developer activity yet.</p>
+        )}
       {items.map((item) => {
         if (item.kind === 'tool') {
           const isSel = item.toolUseId === selectedToolUseId;
@@ -115,11 +114,11 @@ export function DevTimeline({
             <div key={item.key} className="flex justify-end">
               <div
                 className={cn(
-                  'max-w-[85%] rounded-2xl rounded-tr-md px-4 py-2 text-sm border',
+                  'max-w-[85%] rounded-xl rounded-tr-sm px-3 py-1.5 text-[13px] leading-snug border',
                   'bg-amber-600/15 border-amber-700/40',
                 )}
               >
-                <div className="text-xs text-amber-300/80 mb-0.5">
+                <div className="text-[10px] text-amber-300/80 mb-0.5 uppercase tracking-wide">
                   you {isMessage ? '→ dev' : '(note for dev)'}
                 </div>
                 <p className="whitespace-pre-wrap text-amber-50">{item.text}</p>
@@ -129,6 +128,8 @@ export function DevTimeline({
         }
         return null;
       })}
+      </div>
+      <AgentStatus status={status} variant="dev" />
     </div>
   );
 }

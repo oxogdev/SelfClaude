@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { TabBar } from '@/components/tab-bar';
 import { StatusBar } from '@/components/status-bar';
+import { computeDevStatus, computeSupStatus } from '@/components/agent-status';
 import { SupChat } from '@/components/sup-chat';
 import { DevTimeline } from '@/components/dev-timeline';
 import { ToolDetail } from '@/components/tool-detail';
@@ -105,13 +106,18 @@ export default function SessionPage() {
       <StatusBar meta={session.meta} busy={session.busy} />
       <div className="flex-1 flex min-h-0">
         <div style={{ width: supWidth, minWidth: 320 }} className="border-r border-border flex flex-col">
-          <SupChat chatLog={session.chatLog} streamingTs={session.streamingSupTs} />
+          <SupChat
+            chatLog={session.chatLog}
+            streamingTs={session.streamingSupTs}
+            status={computeSupStatus(session.meta, session.streamingSupTs)}
+          />
         </div>
         <div className="flex-1 border-r border-border flex flex-col">
           <DevTimeline
             chatLog={session.chatLog}
             selectedToolUseId={session.selectedToolUseId}
             streamingTs={session.streamingDevTs}
+            status={computeDevStatus(session.meta, session.chatLog, session.streamingDevTs)}
             onSelectTool={(t) => selectTool(id, t)}
           />
         </div>
