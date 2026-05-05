@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { TabBar } from '@/components/tab-bar';
 import { StatusBar } from '@/components/status-bar';
 import { computeDevStatus, computeSupStatus } from '@/components/agent-status';
@@ -13,6 +14,8 @@ import { InputBar } from '@/components/input-bar';
 import { useSessionStore } from '@/lib/store';
 import { subscribeSession } from '@/lib/sse';
 import { api } from '@/lib/api';
+
+const PANEL_LAYOUT_KEY = 'selfclaude.panelLayout.v1';
 
 export default function SessionPage() {
   const params = useParams<{ id: string }>();
@@ -97,36 +100,37 @@ export default function SessionPage() {
     return <div className="p-8 text-zinc-500">Loading session…</div>;
   }
 
-  const supWidth = '32%';
-  const detailWidth = '28%';
-
   return (
     <div className="flex flex-col h-screen bg-bg">
       <TabBar />
       <StatusBar meta={session.meta} busy={session.busy} />
-      <div className="flex-1 flex min-h-0">
-        <div style={{ width: supWidth, minWidth: 320 }} className="border-r border-border flex flex-col">
-          <SupChat
-            chatLog={session.chatLog}
-            streamingTs={session.streamingSupTs}
-            status={computeSupStatus(session.meta, session.streamingSupTs)}
-          />
-        </div>
-        <div className="flex-1 border-r border-border flex flex-col">
-          <DevTimeline
-            chatLog={session.chatLog}
-            selectedToolUseId={session.selectedToolUseId}
-            streamingTs={session.streamingDevTs}
-            status={computeDevStatus(session.meta, session.chatLog, session.streamingDevTs)}
-            onSelectTool={(t) => selectTool(id, t)}
-          />
-        </div>
-        <div style={{ width: detailWidth, minWidth: 280 }} className="flex flex-col">
-          <ToolDetail
-            chatLog={session.chatLog}
-            selectedToolUseId={session.selectedToolUseId}
-          />
-        </div>
+      <div className="flex-1 min-h-0">
+        <PanelGroup direction="horizontal" autoSaveId={PANEL_LAYOUT_KEY}>
+          <Panel defaultSize={32} minSize={20}>
+            <SupChat
+              chatLog={session.chatLog}
+              streamingTs={session.streamingSupTs}
+              status={computeSupStatus(session.meta, session.streamingSupTs)}
+            />
+          </Panel>
+          <PanelResizeHandle className="PanelResizeHandle" />
+          <Panel defaultSize={42} minSize={25}>
+            <DevTimeline
+              chatLog={session.chatLog}
+              selectedToolUseId={session.selectedToolUseId}
+              streamingTs={session.streamingDevTs}
+              status={computeDevStatus(session.meta, session.chatLog, session.streamingDevTs)}
+              onSelectTool={(t) => selectTool(id, t)}
+            />
+          </Panel>
+          <PanelResizeHandle className="PanelResizeHandle" />
+          <Panel defaultSize={26} minSize={18}>
+            <ToolDetail
+              chatLog={session.chatLog}
+              selectedToolUseId={session.selectedToolUseId}
+            />
+          </Panel>
+        </PanelGroup>
       </div>
       <Drawer
         question={session.pendingQuestion}
@@ -135,7 +139,7 @@ export default function SessionPage() {
         onDecide={(aid, decision) => api.decideApproval(id, aid, decision)}
       />
       <div className="flex border-t border-border">
-        <div style={{ width: supWidth, minWidth: 320 }} className="border-r border-border">
+        <div className="w-[32%] min-w-[280px] border-r border-border">
           <InputBar
             variant="sup"
             busy={session.busy}
@@ -145,11 +149,7 @@ export default function SessionPage() {
           />
         </div>
         <div className="flex-1">
-          <InputBar
-            variant="dev"
-            busy={session.busy}
-            onSubmit={handleDevSubmit}
-          />
+          <InputBar variant="dev" busy={session.busy} onSubmit={handleDevSubmit} />
         </div>
       </div>
     </div>

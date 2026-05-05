@@ -17,7 +17,12 @@
     "zustand": "^5.0.1",
     "clsx": "^2.1.1",
     "tailwind-merge": "^2.5.4",
-    "lucide-react": "^0.460.0"
+    "lucide-react": "^0.460.0",
+    "react-markdown": "^9.0.1",
+    "remark-gfm": "^4.0.0",
+    "rehype-highlight": "^7.0.1",
+    "highlight.js": "^11.10.0",
+    "react-resizable-panels": "^2.1.7"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",

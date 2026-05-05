@@ -1,8 +1,8 @@
 'use client';
 
 import { useRef } from 'react';
-import { cn } from '@/lib/cn';
 import { AgentStatus, type AgentStatusInfo } from './agent-status';
+import { BubbleMarkdown } from './bubble-markdown';
 import { useStickyBottom } from './use-sticky-bottom';
 import type { ChatLogEntry } from '@/lib/types';
 
@@ -67,15 +67,7 @@ function Bubble({ entry, streaming = false }: { entry: ChatLogEntry; streaming?:
       <div className="flex justify-start">
         <div className="max-w-[88%] rounded-xl rounded-tl-sm bg-bg-elevated border border-border px-3 py-1.5">
           <div className="text-[10px] text-zinc-400 mb-0.5 uppercase tracking-wide">supervisor</div>
-          <p
-            className={cn(
-              'whitespace-pre-wrap bubble-text',
-              containsTaskTag(entry.text) && 'text-zinc-300',
-            )}
-          >
-            {entry.text}
-            {streaming && <span className="streaming-cursor" />}
-          </p>
+          <BubbleMarkdown streaming={streaming}>{entry.text}</BubbleMarkdown>
         </div>
       </div>
     );
@@ -90,6 +82,3 @@ function Bubble({ entry, streaming = false }: { entry: ChatLogEntry; streaming?:
   return null;
 }
 
-function containsTaskTag(text: string): boolean {
-  return /<TASK_FOR_DEVELOPER>/.test(text);
-}

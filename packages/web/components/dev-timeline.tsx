@@ -4,6 +4,7 @@ import { useRef } from 'react';
 import { Wrench, MessageSquare, FileText, Compass } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { AgentStatus, type AgentStatusInfo } from './agent-status';
+import { BubbleMarkdown } from './bubble-markdown';
 import { useStickyBottom } from './use-sticky-bottom';
 import type { ChatLogEntry } from '@/lib/types';
 
@@ -74,10 +75,9 @@ export function DevTimeline({
           return (
             <div key={item.key} className="flex items-start gap-2 px-2 py-1 text-zinc-200">
               <MessageSquare size={14} className="text-zinc-500 mt-1 shrink-0" />
-              <p className="whitespace-pre-wrap bubble-text">
-                {item.text}
-                {isStreaming && <span className="streaming-cursor" />}
-              </p>
+              <div className="flex-1 min-w-0">
+                <BubbleMarkdown streaming={isStreaming}>{item.text}</BubbleMarkdown>
+              </div>
             </div>
           );
         }
