@@ -55,9 +55,9 @@ function Bubble({ entry, streaming = false }: { entry: ChatLogEntry; streaming?:
   if (entry.type === 'user-message') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-xl rounded-tr-sm bg-cyan-600/20 border border-cyan-700/40 px-3 py-1.5 text-[13px] leading-snug">
+        <div className="max-w-[80%] rounded-xl rounded-tr-sm bg-cyan-600/20 border border-cyan-700/40 px-3 py-1.5">
           <div className="text-[10px] text-cyan-300/80 mb-0.5 uppercase tracking-wide">you</div>
-          <p className="whitespace-pre-wrap">{entry.text}</p>
+          <p className="whitespace-pre-wrap bubble-text">{entry.text}</p>
         </div>
       </div>
     );
@@ -65,9 +65,14 @@ function Bubble({ entry, streaming = false }: { entry: ChatLogEntry; streaming?:
   if (entry.type === 'sup-message') {
     return (
       <div className="flex justify-start">
-        <div className="max-w-[88%] rounded-xl rounded-tl-sm bg-bg-elevated border border-border px-3 py-1.5 text-[13px] leading-snug">
+        <div className="max-w-[88%] rounded-xl rounded-tl-sm bg-bg-elevated border border-border px-3 py-1.5">
           <div className="text-[10px] text-zinc-400 mb-0.5 uppercase tracking-wide">supervisor</div>
-          <p className={cn('whitespace-pre-wrap', containsTaskTag(entry.text) && 'text-zinc-300')}>
+          <p
+            className={cn(
+              'whitespace-pre-wrap bubble-text',
+              containsTaskTag(entry.text) && 'text-zinc-300',
+            )}
+          >
             {entry.text}
             {streaming && <span className="streaming-cursor" />}
           </p>
@@ -77,7 +82,7 @@ function Bubble({ entry, streaming = false }: { entry: ChatLogEntry; streaming?:
   }
   if (entry.type === 'phase-doc-written') {
     return (
-      <div className="text-[11px] text-emerald-500 italic px-2">
+      <div className="text-[10px] text-emerald-500 italic px-2 font-mono">
         📄 wrote docs/phases/{entry.filename}
       </div>
     );

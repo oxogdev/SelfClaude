@@ -72,12 +72,9 @@ export function DevTimeline({
         if (item.kind === 'text') {
           const isStreaming = item.ts === streamingTs;
           return (
-            <div
-              key={item.key}
-              className="flex items-start gap-2 px-2 py-1 text-sm text-zinc-200"
-            >
+            <div key={item.key} className="flex items-start gap-2 px-2 py-1 text-zinc-200">
               <MessageSquare size={14} className="text-zinc-500 mt-1 shrink-0" />
-              <p className="whitespace-pre-wrap leading-relaxed">
+              <p className="whitespace-pre-wrap bubble-text">
                 {item.text}
                 {isStreaming && <span className="streaming-cursor" />}
               </p>
@@ -112,14 +109,14 @@ export function DevTimeline({
             <div key={item.key} className="flex justify-end">
               <div
                 className={cn(
-                  'max-w-[85%] rounded-xl rounded-tr-sm px-3 py-1.5 text-[13px] leading-snug border',
+                  'max-w-[85%] rounded-xl rounded-tr-sm px-3 py-1.5 border',
                   'bg-amber-600/15 border-amber-700/40',
                 )}
               >
                 <div className="text-[10px] text-amber-300/80 mb-0.5 uppercase tracking-wide">
                   you {isMessage ? '→ dev' : '(note for dev)'}
                 </div>
-                <p className="whitespace-pre-wrap text-amber-50">{item.text}</p>
+                <p className="whitespace-pre-wrap text-amber-50 bubble-text">{item.text}</p>
               </div>
             </div>
           );

@@ -72,3 +72,10 @@
 }
 .typing-dots > span:nth-child(1) { animation-delay: -0.32s; }
 .typing-dots > span:nth-child(2) { animation-delay: -0.16s; }
+
+.bubble-text {
+  font-size: 10px;
+  line-height: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 500;
+}
