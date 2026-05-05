@@ -26,6 +26,16 @@ const VERSION = '0.0.1';
 export function buildWebApi(manager: SessionManager): FastifyInstance {
   const server = Fastify({ logger: false });
 
+  // CORS — localhost-bound API, allow any origin so the Next dev server
+  // (port 3000) can talk directly to the API (port 7423) without Next's
+  // proxy buffering SSE deltas.
+  server.addHook('onRequest', async (_req, reply) => {
+    reply.header('Access-Control-Allow-Origin', '*');
+    reply.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'Content-Type');
+  });
+  server.options('/*', async (_req, reply) => reply.code(204).send());
+
   server.get('/api/health', async () => ({
     version: VERSION,
     uptime: process.uptime(),

@@ -13,7 +13,14 @@ export function streamSseFromEmitter(reply: FastifyReply, emitter: EventEmitter)
     'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
+    'Access-Control-Allow-Origin': '*',
   });
+  // Disable Nagle so each SSE frame is flushed to the wire immediately
+  // — without this, token-level deltas can sit in the kernel buffer.
+  const sock = reply.raw.socket;
+  if (sock && 'setNoDelay' in sock) {
+    sock.setNoDelay(true);
+  }
 
   const handler = (event: SessionEvent) => {
     reply.raw.write(`event: ${event.kind}\n`);
@@ -21,7 +28,6 @@ export function streamSseFromEmitter(reply: FastifyReply, emitter: EventEmitter)
   };
   emitter.on('event', handler);
 
-  // Greet so the EventSource onopen fires immediately.
   reply.raw.write('event: ready\ndata: {}\n\n');
 
   const heartbeat = setInterval(() => {

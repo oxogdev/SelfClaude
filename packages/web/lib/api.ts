@@ -1,7 +1,13 @@
 import type { BrowseResult, Favorite, SessionMeta, SessionSnapshot } from './types';
 
+// Direct connection to the SelfClaude Web API. Bypassing the Next.js dev
+// rewrite avoids dev-time SSE buffering that breaks token streaming.
+export const API_BASE =
+  (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_BASE) ||
+  'http://127.0.0.1:7423';
+
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(`${API_BASE}${url}`, {
     ...init,
     headers: {
       'content-type': 'application/json',

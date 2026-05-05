@@ -1,3 +1,4 @@
+import { API_BASE } from './api';
 import type { SessionEvent } from './types';
 
 export type SseSubscription = { close: () => void };
@@ -5,13 +6,16 @@ export type SseSubscription = { close: () => void };
 /**
  * Subscribe to a session's SSE stream. The handler is invoked for every
  * SessionEvent. Browser EventSource auto-reconnects on connection loss.
+ *
+ * Goes directly to the backend API (not via Next's rewrite proxy) because
+ * dev-mode rewrites buffer SSE responses, which kills token streaming.
  */
 export function subscribeSession(
   sessionId: string,
   handler: (event: SessionEvent) => void,
   onError?: (error: Event) => void,
 ): SseSubscription {
-  const url = `/api/sessions/${sessionId}/events`;
+  const url = `${API_BASE}/api/sessions/${sessionId}/events`;
   const es = new EventSource(url);
 
   // Each event arrives with `event: <kind>` so we listen on each kind. Easier:

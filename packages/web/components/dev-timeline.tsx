@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { Wrench, MessageSquare, FileText, Compass } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { AgentStatus, type AgentStatusInfo } from './agent-status';
+import { useStickyBottom } from './use-sticky-bottom';
 import type { ChatLogEntry } from '@/lib/types';
 
 export function DevTimeline({
@@ -20,12 +21,9 @@ export function DevTimeline({
   onSelectTool: (toolUseId: string | null) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  useStickyBottom(ref, [chatLog, streamingTs, status]);
 
   const items = buildItems(chatLog);
-
-  useEffect(() => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [items.length, chatLog]);
 
   return (
     <div className="h-full flex flex-col">

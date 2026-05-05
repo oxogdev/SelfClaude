@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { cn } from '@/lib/cn';
 import { AgentStatus, type AgentStatusInfo } from './agent-status';
+import { useStickyBottom } from './use-sticky-bottom';
 import type { ChatLogEntry } from '@/lib/types';
 
 export function SupChat({
@@ -15,6 +16,7 @@ export function SupChat({
   status: AgentStatusInfo | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  useStickyBottom(ref, [chatLog, streamingTs, status]);
 
   // Filter to supervisor-pane-relevant entries.
   const lines = chatLog.filter(
@@ -24,10 +26,6 @@ export function SupChat({
       e.type === 'phase-doc-written' ||
       (e.type === 'iteration-end' && false),
   );
-
-  useEffect(() => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [lines.length, chatLog]);
 
   return (
     <div className="h-full flex flex-col">
