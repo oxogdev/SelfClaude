@@ -25,6 +25,8 @@ export interface SpawnOptions {
   enableChrome?: boolean;
   /** Emit hook lifecycle events into the stream-json output. Default: false. */
   includeHookEvents?: boolean;
+  /** Pass --include-partial-messages so callers can render token-level streaming. Default: true. */
+  includePartialMessages?: boolean;
   envOverrides?: Record<string, string>;
   signal?: AbortSignal;
   /** Override the binary path (for tests/dev). Default: 'claude'. */
@@ -58,6 +60,7 @@ export function buildClaudeArgs(opts: SpawnOptions): string[] {
   if (opts.settingsPath) args.push('--settings', opts.settingsPath);
   if (opts.enableChrome !== false) args.push('--chrome');
   if (opts.includeHookEvents) args.push('--include-hook-events');
+  if (opts.includePartialMessages !== false) args.push('--include-partial-messages');
   return args;
 }
 
