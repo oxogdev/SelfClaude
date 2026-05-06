@@ -5,15 +5,19 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        // Bumped for higher contrast — original palette read fine at 25cm
+        // but sat too close to mid-grey for comfortable scanning. Each
+        // layer now shifts ~2 luma steps lighter so panes stand apart and
+        // borders register without squinting.
         bg: {
-          DEFAULT: '#0a0a0a',
-          subtle: '#101012',
-          panel: '#15161a',
-          elevated: '#1c1d22',
+          DEFAULT: '#08090c',
+          subtle: '#13151b',
+          panel: '#1d1f27',
+          elevated: '#2a2d37',
         },
         border: {
-          DEFAULT: '#2a2c33',
-          strong: '#3a3d46',
+          DEFAULT: '#3d4150',
+          strong: '#525667',
         },
       },
       fontFamily: {

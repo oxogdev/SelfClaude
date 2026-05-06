@@ -21,6 +21,11 @@ import {
 
 const ORCH_URL = process.env.SELFCLAUDE_ORCH_URL;
 const ROLE = process.env.SELFCLAUDE_ROLE ?? 'unknown';
+// `SELFCLAUDE_AGENT` carries the specialist identity (`developer`,
+// `ui-dev`, `security`, …); CC's hook protocol only exposes `role`,
+// so the orchestrator side-channels real agent name through this env
+// var. Falls back to `role` for legacy single-agent flows.
+const AGENT = process.env.SELFCLAUDE_AGENT ?? ROLE;
 
 if (!ORCH_URL) {
   process.stderr.write(
@@ -104,6 +109,174 @@ const TOOLS = [
       required: ['filename', 'content'],
     },
   },
+  {
+    name: 'register_phase_items',
+    description:
+      'SUPERVISOR-ONLY. Declare the structured Definition-of-Done checklist for a phase ' +
+      'when entering it. The phase tracker (`<cwd>/.selfclaude/phases.json`) is the canonical ' +
+      'progress source — agents propose items as done, you confirm or reject them, the UI ' +
+      'shows live status. Re-registering a phase merges with prior progress: existing items ' +
+      'with the same id keep their status + audit trail; new items land as `pending`; items ' +
+      'absent from the new list are dropped. Call this once per phase, right after writing ' +
+      'the phase doc and before delegating any task.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: {
+          type: 'string',
+          description: 'Phase slug matching the doc filename basename, e.g. "01-foundation".',
+        },
+        title: {
+          type: 'string',
+          description: 'Human-readable phase title shown in the UI, e.g. "Phase 01 — Foundation".',
+        },
+        items: {
+          type: 'array',
+          description:
+            'Checklist items — one DoD per item. Each id is a stable slug used by ' +
+            'propose/confirm/reject calls; titles can be edited by re-registering.',
+          items: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+                description: 'Slug id (a-z0-9-), unique within the phase, e.g. "auth-middleware".',
+              },
+              title: {
+                type: 'string',
+                description: 'Plain-language DoD line, e.g. "Auth middleware wired and unit-tested".',
+              },
+            },
+            required: ['id', 'title'],
+          },
+        },
+      },
+      required: ['slug', 'title', 'items'],
+    },
+  },
+  {
+    name: 'propose_item_done',
+    description:
+      'Any agent can call this. Mark a phase tracker item as `proposed` — meaning "I think ' +
+      "I'm done with this; sup, please review.\" The supervisor's inbox gets a notification " +
+      'and will see the item highlighted on its next turn for confirm/reject. Include in ' +
+      '`notes` what you actually did + how to verify (test command, file path, etc.) so the ' +
+      'sup can spot-check without a long round-trip.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: { type: 'string', description: 'Phase slug, e.g. "01-foundation".' },
+        itemId: { type: 'string', description: 'Item id assigned at registration.' },
+        notes: {
+          type: 'string',
+          description:
+            'What you did + how to verify. Short and specific beats long and vague. Optional ' +
+            'but strongly recommended.',
+        },
+      },
+      required: ['slug', 'itemId'],
+    },
+  },
+  {
+    name: 'confirm_item_done',
+    description:
+      'SUPERVISOR-ONLY. Mark a phase tracker item as `done` after reviewing the proposer\'s ' +
+      'work (read the diff, run the test command they gave you in notes, sanity-check the ' +
+      'file). Use this *only* after verification — flipping a checkbox without a peek defeats ' +
+      'the safety net.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: { type: 'string' },
+        itemId: { type: 'string' },
+        notes: {
+          type: 'string',
+          description: 'Optional confirmation note ("tested with X, looks good").',
+        },
+      },
+      required: ['slug', 'itemId'],
+    },
+  },
+  {
+    name: 'reject_item_done',
+    description:
+      'SUPERVISOR-ONLY. Send a proposed item back to `pending` with a reason — when review ' +
+      "reveals the proposer missed something. The proposer's inbox gets the rejection text " +
+      'so they pick up the fix on their next turn. Be specific: what was missed, what to do ' +
+      'next, which file/test to address.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: { type: 'string' },
+        itemId: { type: 'string' },
+        reason: {
+          type: 'string',
+          description: 'Required. Why it failed review + what the proposer should fix.',
+        },
+      },
+      required: ['slug', 'itemId', 'reason'],
+    },
+  },
+  {
+    name: 'propose_script',
+    description:
+      'SUPERVISOR-ONLY. Propose a recurring Bash command as a reusable script. The operator ' +
+      'reviews + approves through the web UI; once approved, the script lands at ' +
+      '`<cwd>/.selfclaude/scripts/<slug>.sh` and you invoke it via the regular `Bash` tool ' +
+      '(`./.selfclaude/scripts/<slug>.sh`). Use this when you find yourself running the same ' +
+      "Bash command 3+ times — it's a token saver and gives the operator a vetted toolbox to " +
+      'inspect and reuse across projects.\n\n' +
+      'Slug rules: kebab-case (a-z, 0-9, hyphen), max 63 chars. Pick a name that reads like ' +
+      'what the script does (`check-types`, `run-smoke-test`, `dump-schema`).\n\n' +
+      "Body rules: standalone Bash. No relative-cwd assumptions — write `cd \"$(dirname \"$0\")/../..\"` " +
+      "if you need the project root. The orchestrator prepends `set -euo pipefail` and a " +
+      'metadata header on approval; you only supply the body lines.\n\n' +
+      'Reason rules: explain *why* this is worth a script (how often you call it, what the ' +
+      'output is for). The operator reads this verbatim before approving — be specific.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: {
+          type: 'string',
+          description: 'kebab-case identifier, e.g. "check-types".',
+        },
+        body: {
+          type: 'string',
+          description: 'Bash script body (no shebang — orchestrator prepends).',
+        },
+        reason: {
+          type: 'string',
+          description: 'Why this script is worth approving (use case + frequency).',
+        },
+      },
+      required: ['slug', 'body', 'reason'],
+    },
+  },
+  {
+    name: 'apply_agent_dna',
+    description:
+      'SUPERVISOR-ONLY. Apply a bundled DNA template to this project — opts a specific agent ' +
+      "into a deeper standards contract. Today's catalogue: `admin-panel` (targets ui-dev with " +
+      'strict topology, shadcn + Tailwind v4, locked stack, AppModal/DataTable family, theme ' +
+      'tokens). Call this at bootstrap *only when the project shape matches* the template — ' +
+      'e.g. apply admin-panel for an admin/dashboard project but NOT for a marketing site or ' +
+      'mobile app. Idempotent: returns "already-applied" if the file exists, so re-running is ' +
+      'safe and never clobbers operator hand-edits.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dnaSlug: {
+          type: 'string',
+          description: 'DNA template slug (e.g. "admin-panel"). Picks the file from the bundled registry.',
+        },
+        force: {
+          type: 'boolean',
+          description: 'Overwrite an existing DNA file instead of returning "already-applied". Rare — usually preserves operator edits.',
+        },
+      },
+      required: ['dnaSlug'],
+    },
+  },
 ];
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
@@ -148,6 +321,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
     const body = (await resp.json()) as { path: string };
     return { content: [{ type: 'text', text: `wrote ${body.path}` }] };
+  }
+  // Phase tracker + agent-DNA + script proposal family — all share the
+  // same `{ok, message}` response shape and pass `role` + `agent` so
+  // the orchestrator can attribute calls to the actual specialist
+  // (developer / ui-dev / supervisor / …).
+  const ackToolPaths: Record<string, string> = {
+    register_phase_items: '/mcp/register_phase_items',
+    propose_item_done: '/mcp/propose_item_done',
+    confirm_item_done: '/mcp/confirm_item_done',
+    reject_item_done: '/mcp/reject_item_done',
+    apply_agent_dna: '/mcp/apply_agent_dna',
+    propose_script: '/mcp/propose_script',
+  };
+  const ackPath = ackToolPaths[name];
+  if (ackPath) {
+    const resp = await fetch(`${ORCH_URL}${ackPath}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...args, role: ROLE, agent: AGENT }),
+    });
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '');
+      throw new Error(`orchestrator returned ${resp.status}: ${detail}`);
+    }
+    const body = (await resp.json()) as { ok: boolean; message: string };
+    if (!body.ok) {
+      throw new Error(body.message || `${name} failed`);
+    }
+    return { content: [{ type: 'text', text: body.message }] };
   }
   throw new Error(`unknown tool: ${name}`);
 });

@@ -8,6 +8,7 @@ set -uo pipefail
 
 INPUT="$(cat)"
 ROLE="${SELFCLAUDE_ROLE:-unknown}"
+AGENT="${SELFCLAUDE_AGENT:-$ROLE}"
 URL="${SELFCLAUDE_ORCH_URL:-}"
 
 if [ -z "$URL" ]; then
@@ -17,7 +18,7 @@ fi
 RESP="$(curl -fsS --max-time 600 \
   -X POST -H 'Content-Type: application/json' \
   -d "$INPUT" \
-  "${URL}/hook/pretool?role=${ROLE}" 2>/dev/null)" || RESP=""
+  "${URL}/hook/pretool?role=${ROLE}&agent=${AGENT}" 2>/dev/null)" || RESP=""
 
 if [ -n "$RESP" ]; then
   printf '%s' "$RESP"

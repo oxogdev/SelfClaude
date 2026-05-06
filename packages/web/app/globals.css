@@ -77,8 +77,8 @@
 .typing-dots > span:nth-child(2) { animation-delay: -0.16s; }
 
 .bubble-text {
-  font-size: 10px;
-  line-height: 13px;
+  font-size: 12px;
+  line-height: 16px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-weight: 500;
 }
@@ -89,10 +89,11 @@
  * highlight.js paints the syntax via the github-dark theme imported above.
  */
 .bubble-md {
-  font-size: 10px;
-  line-height: 13px;
+  font-size: 12px;
+  line-height: 16px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-weight: 500;
+  color: rgb(228 228 231);
 }
 .bubble-md > :first-child { margin-top: 0; }
 .bubble-md > :last-child { margin-bottom: 0; }
@@ -100,68 +101,89 @@
 .bubble-md h1, .bubble-md h2, .bubble-md h3, .bubble-md h4 {
   font-weight: 700;
   margin: 0.6em 0 0.3em;
-  font-size: 11px;
-  color: rgb(243 244 246);
+  font-size: 13px;
+  color: rgb(244 244 245);
 }
 .bubble-md ul, .bubble-md ol { margin: 0.4em 0; padding-left: 1.4em; }
-.bubble-md ul { list-style: disc; }
-.bubble-md ol { list-style: decimal; }
-.bubble-md li { margin: 0.15em 0; }
+.bubble-md ul { list-style: disc; padding: 0px 0px 0px 30px;}
+.bubble-md ol { list-style: decimal; padding: 0px 0px 0px 30px;}
+.bubble-md li { margin: 0.2em 0; }
 .bubble-md blockquote {
-  border-left: 2px solid rgba(255, 255, 255, 0.18);
-  padding-left: 0.6em;
-  color: rgba(255, 255, 255, 0.7);
-  margin: 0.4em 0;
+  border-left: 3px solid rgb(82 86 103);
+  padding-left: 0.8em;
+  color: rgb(212 212 216);
+  margin: 0.5em 0;
 }
-.bubble-md a { color: #38bdf8; text-decoration: underline; }
-.bubble-md hr { border-color: rgba(255, 255, 255, 0.1); margin: 0.6em 0; }
+.bubble-md a { color: #7dd3fc; text-decoration: underline; }
+.bubble-md hr { border-color: rgb(82 86 103); margin: 0.8em 0; }
 .bubble-md code:not(pre code) {
-  background: rgba(255, 255, 255, 0.08);
-  padding: 0.05em 0.35em;
+  background: rgba(255, 255, 255, 0.12);
+  padding: 0.1em 0.4em;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: 12px;
+  color: rgb(244 244 245);
 }
 .bubble-md pre {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  padding: 0.55em 0.7em;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgb(61 65 80);
+  padding: 0.7em 0.85em;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-width: 100%;
   border-radius: 4px;
   margin: 0.5em 0;
   overflow-x: auto;
-  font-size: 10px;
-  line-height: 13px;
+  font-size: 12px;
+  line-height: 16px;
 }
 .bubble-md pre code {
   background: transparent;
   padding: 0;
-  font-size: 10px;
+  font-size: 12px;
 }
 .bubble-md table {
-  margin: 0.5em 0;
+  margin: 0.6em 0;
   border-collapse: collapse;
 }
 .bubble-md th, .bubble-md td {
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 0.25em 0.5em;
+  border: 1px solid rgb(61 65 80);
+  padding: 0.35em 0.6em;
   text-align: left;
 }
-.bubble-md th { background: rgba(255, 255, 255, 0.04); font-weight: 700; }
+.bubble-md th { background: rgba(255, 255, 255, 0.08); font-weight: 700; color: rgb(244 244 245); }
 
-/* react-resizable-panels separator handles. */
+/* Indeterminate progress shimmer used by ToolCard while a tool result
+   is in flight. Slides left→right repeatedly without consuming
+   horizontal space (the parent clips overflow). Pure transform so the
+   browser stays on the compositor thread. */
+@keyframes progress-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.progress-shimmer {
+  animation: progress-shimmer 1.4s linear infinite;
+  opacity: 0.7;
+}
+
+/* react-resizable-panels separator handles. The resting colour is
+   visibly distinct from both adjacent panes (uses border.strong from the
+   palette) so the operator can see where one pane ends and the next
+   begins without hovering. Hover/active flips to cyan for affordance. */
 .PanelResizeHandle {
   position: relative;
-  background: transparent;
+  background: rgb(82 86 103);
   transition: background 0.15s ease-in-out;
 }
 .PanelResizeHandle:hover,
 .PanelResizeHandle[data-resize-handle-active] {
-  background: rgba(56, 189, 248, 0.3);
+  background: rgba(56, 189, 248, 0.7);
 }
 .PanelResizeHandle[data-panel-group-direction='horizontal'] {
-  width: 3px;
+  width: 2px;
   cursor: col-resize;
 }
 .PanelResizeHandle[data-panel-group-direction='vertical'] {
-  height: 3px;
+  height: 2px;
   cursor: row-resize;
 }

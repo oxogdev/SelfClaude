@@ -112,6 +112,34 @@ export class StreamJsonParser {
   }
 }
 
+/**
+ * Result metrics emitted by Claude Code at the end of every turn. We use
+ * these to build the bottom-toolbar cost/duration badges and to notice
+ * pathological turns (sky-high cost, multi-minute duration).
+ */
+export interface ResultMetrics {
+  costUsd: number;
+  durationMs: number;
+  numTurns: number;
+  stopReason: string | null;
+}
+
+export function extractResultMetrics(evt: StreamEvent): ResultMetrics | null {
+  if (evt.type !== 'result') return null;
+  const e = evt as {
+    total_cost_usd?: number;
+    duration_ms?: number;
+    num_turns?: number;
+    stop_reason?: string;
+  };
+  return {
+    costUsd: typeof e.total_cost_usd === 'number' ? e.total_cost_usd : 0,
+    durationMs: typeof e.duration_ms === 'number' ? e.duration_ms : 0,
+    numTurns: typeof e.num_turns === 'number' ? e.num_turns : 0,
+    stopReason: typeof e.stop_reason === 'string' ? e.stop_reason : null,
+  };
+}
+
 export function extractAssistantText(evt: StreamEvent): string {
   if (evt.type !== 'assistant') return '';
   const message = (evt as { message?: { content?: unknown[] } }).message;
@@ -151,6 +179,49 @@ export function extractStreamTextDelta(evt: StreamEvent): string | null {
   if (inner.type !== 'content_block_delta') return null;
   if (inner.delta?.type !== 'text_delta') return null;
   return typeof inner.delta.text === 'string' ? inner.delta.text : null;
+}
+
+/**
+ * Extract a token-level THINKING delta. Same partial-messages mechanism
+ * as `extractStreamTextDelta`, but the delta type is `thinking_delta` and
+ * the field is `thinking` rather than `text`. Surfacing thinking lets
+ * the operator watch the model reason in real time.
+ */
+export function extractStreamThinkingDelta(evt: StreamEvent): string | null {
+  if (evt.type !== 'stream_event') return null;
+  const inner = (
+    evt as {
+      event?: { type?: string; delta?: { type?: string; thinking?: string } };
+    }
+  ).event;
+  if (!inner) return null;
+  if (inner.type !== 'content_block_delta') return null;
+  if (inner.delta?.type !== 'thinking_delta') return null;
+  return typeof inner.delta.thinking === 'string' ? inner.delta.thinking : null;
+}
+
+/**
+ * Pull `thinking` content blocks out of an assembled assistant event.
+ * Used at message-complete time to persist the full thinking text to the
+ * chat-log (the partial deltas only update the live UI).
+ */
+export function extractAssistantThinking(evt: StreamEvent): string {
+  if (evt.type !== 'assistant') return '';
+  const message = (evt as { message?: { content?: unknown[] } }).message;
+  const content = message?.content;
+  if (!Array.isArray(content)) return '';
+  const parts: string[] = [];
+  for (const item of content) {
+    if (
+      typeof item === 'object' &&
+      item !== null &&
+      (item as { type?: unknown }).type === 'thinking' &&
+      typeof (item as { thinking?: unknown }).thinking === 'string'
+    ) {
+      parts.push((item as { thinking: string }).thinking);
+    }
+  }
+  return parts.join('');
 }
 
 export interface ToolUseBlock {

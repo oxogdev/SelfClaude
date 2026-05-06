@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { Octagon } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { api } from '@/lib/api';
+import { ConfirmDialog } from './confirm-dialog';
 import type { ChatLogEntry, SessionMeta } from '@/lib/types';
 
 export type StatusKind = 'thinking' | 'writing' | 'tool' | 'working';
@@ -103,7 +107,12 @@ export function AgentStatus({
   status: AgentStatusInfo | null;
   variant: 'sup' | 'dev';
 }) {
+  const params = useParams<{ id: string }>();
+  const sessionId = params?.id;
   const [tick, setTick] = useState(0);
+  const [confirming, setConfirming] = useState(false);
+  const [aborting, setAborting] = useState(false);
+
   useEffect(() => {
     if (!status) return;
     const id = setInterval(() => setTick((t) => t + 1), ROTATION_MS);
@@ -125,27 +134,69 @@ export function AgentStatus({
     labelText = arr[tick % arr.length] ?? arr[0]!;
   }
 
+  const role = variant === 'sup' ? 'supervisor' : 'developer';
+
+  /** Fire the abort. The status bar disappears as soon as the SSE
+   *  `turn-busy false` event lands; we don't need any local state for it. */
+  const handleAbort = async () => {
+    if (!sessionId) return;
+    setAborting(true);
+    setConfirming(false);
+    try {
+      await api.abortTurn(sessionId, role);
+    } catch (e) {
+      console.warn('abortTurn failed:', (e as Error).message);
+    } finally {
+      setAborting(false);
+    }
+  };
+
   return (
-    <div
-      className={cn(
-        'px-3 py-1.5 text-[11px] flex items-center gap-2 border-t border-border bg-bg-subtle/60',
-        colorClass,
-      )}
-    >
-      <span className="typing-dots">
-        <span />
-        <span />
-        <span />
-      </span>
-      <span>{variant === 'sup' ? 'supervisor' : 'developer'}</span>
-      <span className="text-zinc-500">·</span>
-      <span>{labelText}</span>
-      {detail && (
-        <>
-          <span className="text-zinc-500">·</span>
-          <code className="text-zinc-300 truncate max-w-[400px]">{detail}</code>
-        </>
-      )}
-    </div>
+    <>
+      <div
+        className={cn(
+          'px-3 py-1.5 text-[11px] flex items-center gap-2 border-t border-border bg-bg-subtle/60',
+          colorClass,
+        )}
+      >
+        <span className="typing-dots">
+          <span />
+          <span />
+          <span />
+        </span>
+        <span>{variant === 'sup' ? 'supervisor' : 'developer'}</span>
+        <span className="text-zinc-500">·</span>
+        <span>{labelText}</span>
+        {detail && (
+          <>
+            <span className="text-zinc-500">·</span>
+            <code className="text-zinc-300 truncate max-w-[400px]">{detail}</code>
+          </>
+        )}
+        <button
+          onClick={() => setConfirming(true)}
+          disabled={aborting}
+          className={cn(
+            'ml-auto shrink-0 flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-medium transition-colors',
+            'border-red-800/60 bg-red-950/30 text-red-300 hover:bg-red-900/50 hover:border-red-700',
+            'disabled:opacity-50',
+          )}
+          title={`emergency stop ${role}`}
+        >
+          <Octagon size={10} />
+          stop
+        </button>
+      </div>
+      <ConfirmDialog
+        open={confirming}
+        title={`Stop the ${role}?`}
+        message={`This will SIGTERM the ${role}'s Claude Code subprocess immediately. Any in-flight tool call will be killed and the turn will end with an error. The session itself stays alive — you can prompt it again afterward.\n\nUse this when the ${role} appears stuck (a hung Bash command, a runaway loop, a wakeup that shouldn't have fired).`}
+        confirmLabel="Stop now"
+        cancelLabel="Keep running"
+        variant="danger"
+        onConfirm={handleAbort}
+        onCancel={() => setConfirming(false)}
+      />
+    </>
   );
 }

@@ -168,3 +168,30 @@ All ten internal milestones are green:
 | M10 | Polish + smoke tests | real `selfclaude start` wiring, README |
 
 89 unit tests + 9 integration tests, all green.
+
+
+## Global Kullanım (düzenlenecek)
+Komutlar (artık her yerden): 
+ 
+selfclaude start# daemon olarak başlat, terminal serbest
+selfclaude start --foreground # debug için inline (Ctrl+C exits) 
+ 
+selfclaude stop # graceful kapat 
+selfclaude restart# stop + start 
+selfclaude status # çalışıyor mu 
+ 
+selfclaude logs # son 100 satır log
+selfclaude logs -f# canlı takip
+selfclaude logs -n 500# son 500 satır
+ 
+Senin için kullanım: 
+cd ~/Developer/projects/SelfClaude && git pull 
+selfclaude start# tarayıcı otomatik açılır, terminal sana döner
+# … çalış …
+selfclaude stop # işin bittiğinde
+ 
+Önemli detay:
+- PID file: ~/.selfclaude/run.pid
+- Log file: ~/.selfclaude/run.log
+- Stale PID otomatik temizlenir (process ölü ama dosya kalmışsa) 
+- selfclaude stop 5sn graceful, sonra SIGKILL

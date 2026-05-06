@@ -3,18 +3,36 @@
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Folder, Home, Plus, X } from 'lucide-react';
+import { Folder, Plus, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { SessionMeta } from '@/lib/types';
 import { cn } from '@/lib/cn';
+import {
+  clearClosing,
+  filterClosing,
+  isClosing,
+  markClosing,
+  useClosingTick,
+} from '@/lib/closing-sessions';
+import { SelfClaudeLogo } from './selfclaude-logo';
 
 const POLL_MS = 4_000;
+// Tombstone lives well past the destroy round-trip. destroySession
+// blocks up to 5s on a busy turn, then orchestrator.stop() runs. Some
+// of those settle paths (CC subprocess SIGTERM, hook server close) can
+// stretch a few extra seconds. 30s gives us ~7 polling cycles of grace.
+const TOMBSTONE_MS = 30_000;
 
 export function TabBar() {
   const pathname = usePathname();
   const router = useRouter();
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Re-render this instance whenever the shared closing-id set
+  // mutates — covers the case where another component (or a previous
+  // TabBar mount) marked an id closing and our render needs to update.
+  useClosingTick();
+
   const activeId = (() => {
     const m = pathname?.match(/^\/sessions\/([^/]+)/);
     return m?.[1] ?? null;
@@ -23,7 +41,7 @@ export function TabBar() {
   const refresh = async () => {
     try {
       const r = await api.listSessions();
-      setSessions(r.sessions);
+      setSessions(filterClosing(r.sessions));
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -37,30 +55,39 @@ export function TabBar() {
   }, []);
 
   const closeTab = async (id: string) => {
+    if (isClosing(id)) return;
+    markClosing(id);
+
+    const wasActive = id === activeId;
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+    if (wasActive) {
+      const remaining = sessions.filter((s) => s.id !== id);
+      const fallback = remaining[remaining.length - 1];
+      router.push(fallback ? `/sessions/${fallback.id}` : '/');
+    }
     try {
       await api.destroySession(id);
-      const next = sessions.filter((s) => s.id !== id);
-      setSessions(next);
-      if (id === activeId) {
-        const fallback = next[next.length - 1];
-        router.push(fallback ? `/sessions/${fallback.id}` : '/');
-      }
     } catch (e) {
-      setError((e as Error).message);
+      console.warn('[tab-bar] destroySession failed:', (e as Error).message);
+    } finally {
+      // setTimeout outlives the originating component — that's
+      // intentional, we WANT the tombstone to lift across navigations.
+      setTimeout(() => clearClosing(id), TOMBSTONE_MS);
     }
   };
 
   return (
-    <div className="flex items-stretch bg-bg-subtle border-b border-border h-9 overflow-x-auto scrollbar-thin shrink-0">
+    <div className="flex items-stretch bg-bg-subtle border-b-2 border-border-strong h-9 overflow-x-auto scrollbar-thin shrink-0">
       <Link
         href="/"
         className={cn(
-          'px-3 flex items-center text-zinc-400 hover:text-zinc-200 border-r border-border',
-          pathname === '/' && 'text-zinc-100 bg-bg-panel',
+          'px-3 flex items-center border-r border-border hover:bg-bg-elevated/60 transition-colors',
+          pathname === '/' && 'bg-bg-panel',
         )}
-        aria-label="home"
+        aria-label="home — SelfClaude"
+        title="SelfClaude home"
       >
-        <Home size={14} />
+        <SelfClaudeLogo variant="wordmark" size="xs" />
       </Link>
 
       {sessions.map((s) => (
@@ -68,6 +95,7 @@ export function TabBar() {
           key={s.id}
           session={s}
           active={s.id === activeId}
+          closing={isClosing(s.id)}
           onClose={() => closeTab(s.id)}
         />
       ))}
@@ -92,41 +120,75 @@ export function TabBar() {
 function Tab({
   session,
   active,
+  closing,
   onClose,
 }: {
   session: SessionMeta;
   active: boolean;
+  closing: boolean;
   onClose: () => void;
 }) {
+  // Close button MUST live as a sibling of the Link, not nested inside
+  // it — Next.js intercepts navigation at a higher level than React's
+  // synthetic-event preventDefault, so a nested button click would
+  // still navigate. Putting them side-by-side in a flex row gives the
+  // button its own click target with no ambiguity.
   return (
-    <Link
-      href={`/sessions/${session.id}`}
+    <div
       className={cn(
-        'group flex items-center gap-2 px-3 text-sm border-r border-border min-w-0',
+        'group flex items-center border-r border-border min-w-0 relative',
         active
-          ? 'bg-bg-panel text-zinc-100 border-b-2 border-b-cyan-500 -mb-px'
-          : 'text-zinc-400 hover:bg-bg-elevated',
+          ? 'bg-bg-panel border-b-2 border-b-cyan-500 -mb-px'
+          : 'hover:bg-bg-elevated',
+        closing && 'opacity-50 pointer-events-none',
       )}
       title={session.cwd}
     >
-      <Folder size={12} className="shrink-0 text-zinc-500" />
-      <span className="truncate max-w-[160px]">{session.label}</span>
-      {session.busy && <span className="text-xs text-cyan-400 shrink-0">●</span>}
+      <Link
+        href={`/sessions/${session.id}`}
+        className={cn(
+          'flex items-center gap-2 pl-3 pr-1 py-2 text-sm min-w-0',
+          active ? 'text-zinc-100' : 'text-zinc-400',
+        )}
+      >
+        <Folder size={12} className="shrink-0 text-zinc-500" />
+        <span className="truncate max-w-[160px]">{session.label}</span>
+        {closing ? (
+          <span className="text-[9px] uppercase tracking-wider text-rose-400 shrink-0">closing…</span>
+        ) : (
+          session.busy && <span className="text-xs text-cyan-400 shrink-0">●</span>
+        )}
+      </Link>
       <button
-        onClick={(e) => {
+        type="button"
+        onMouseDown={(e) => {
+          // Use mousedown instead of onClick — browsers dispatch
+          // mousedown before the Link can capture-bubble navigation,
+          // and we treat it as the authoritative close trigger.
           e.preventDefault();
           e.stopPropagation();
           onClose();
         }}
+        onClick={(e) => {
+          // Defensive — if some path delivers click but not mousedown
+          // (touch / accessibility tools), still fire the close.
+          e.preventDefault();
+          e.stopPropagation();
+        }}
         className={cn(
-          'shrink-0 rounded p-0.5 transition-opacity',
-          'opacity-0 group-hover:opacity-60 hover:!opacity-100',
-          active && 'opacity-50',
+          'shrink-0 rounded p-1 mr-1.5 ml-1 transition-colors text-zinc-300 hover:text-white hover:bg-rose-700/60 cursor-pointer',
+          // Visibility: always visible on active tab, otherwise show
+          // on group hover. Operators kept missing the X on the active
+          // tab when it was opacity-50 — making it always visible there
+          // resolves the "X doesn't close" perception.
+          active ? 'opacity-90' : 'opacity-0 group-hover:opacity-70 hover:!opacity-100',
         )}
         aria-label={`close ${session.label}`}
+        title={`Close ${session.label}`}
+        disabled={closing}
       >
-        <X size={12} />
+        <X size={13} strokeWidth={2.5} />
       </button>
-    </Link>
+    </div>
   );
 }

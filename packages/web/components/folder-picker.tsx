@@ -1,10 +1,49 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Folder, FolderOpen, ChevronUp, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Box,
+  ChevronRight,
+  Code2,
+  Folder,
+  FolderGit2,
+  FolderOpen,
+  FolderPlus,
+  GitBranch,
+  Home,
+  Loader2,
+  Search,
+  Sparkles,
+  X,
+} from 'lucide-react';
 import { api } from '@/lib/api';
-import type { BrowseResult } from '@/lib/types';
+import type { BrowseEntry, BrowseResult, ProjectSignal } from '@/lib/types';
 import { cn } from '@/lib/cn';
+
+/**
+ * Folder picker — landing-screen entry point for "Open project". Three
+ * regions:
+ *
+ *   1. **Quick shortcuts** (left rail): Home, Desktop, Documents, ~/Developer
+ *      so the operator doesn't have to navigate up from `/`. Recently-used
+ *      sessions also appear here once we have an MRU list to pull from.
+ *
+ *   2. **Path breadcrumb + filter** (top): each segment is a clickable
+ *      button so you can jump up multiple levels in one click. Filter
+ *      input narrows the visible entries by name.
+ *
+ *   3. **Folder list**: each row shows the folder name plus project-
+ *      signal badges (git, package.json, .selfclaude…). Single click
+ *      navigates into the folder (or selects, with Enter to commit).
+ *      Operator confirms via the bottom "Open this folder" button or
+ *      double-clicks any row to open + create.
+ */
+
+interface Shortcut {
+  label: string;
+  path: string;
+  icon: React.ReactNode;
+}
 
 export function FolderPicker({
   onSelect,
@@ -16,10 +55,22 @@ export function FolderPicker({
   const [data, setData] = useState<BrowseResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [filter, setFilter] = useState('');
+  const filterRef = useRef<HTMLInputElement>(null);
+  // Inline mkdir affordance — operator hits the FolderPlus button to
+  // open a small input, types a name, Enter creates + navigates into
+  // the new folder. Server-side regex catches invalid names; we
+  // surface its error message verbatim so the rule is discoverable.
+  const [creating, setCreating] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [creatingError, setCreatingError] = useState<string | null>(null);
+  const [creatingPending, setCreatingPending] = useState(false);
+  const newFolderRef = useRef<HTMLInputElement>(null);
 
   const browse = async (path?: string) => {
     setLoading(true);
     setError(null);
+    setFilter('');
     try {
       const result = await api.browse(path);
       setData(result);
@@ -34,92 +85,513 @@ export function FolderPicker({
     void browse();
   }, []);
 
+  // Esc closes; / focuses the filter; Enter on a single match opens it.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel();
+      if (e.key === '/' && document.activeElement?.tagName !== 'INPUT') {
+        e.preventDefault();
+        filterRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onCancel]);
+
+  const shortcuts: Shortcut[] = useMemo(() => {
+    const home = data?.path?.match(/^(\/Users\/[^/]+)/)?.[1] ?? '';
+    if (!home) return [];
+    return [
+      { label: 'Home', path: home, icon: <Home size={13} /> },
+      { label: 'Desktop', path: `${home}/Desktop`, icon: <Box size={13} /> },
+      { label: 'Documents', path: `${home}/Documents`, icon: <FolderOpen size={13} /> },
+      { label: 'Developer', path: `${home}/Developer`, icon: <Code2 size={13} /> },
+      { label: 'projects', path: `${home}/Developer/projects`, icon: <FolderGit2 size={13} /> },
+    ];
+  }, [data?.path]);
+
+  const breadcrumb = useMemo(() => {
+    if (!data?.path) return [];
+    const parts = data.path.split('/').filter(Boolean);
+    const segs: { label: string; path: string }[] = [{ label: '/', path: '/' }];
+    let acc = '';
+    for (const p of parts) {
+      acc += `/${p}`;
+      segs.push({ label: p, path: acc });
+    }
+    return segs;
+  }, [data?.path]);
+
+  const visibleEntries = useMemo(() => {
+    if (!data) return [];
+    const base = data.entries.filter((e) => e.isDir && !e.isHidden);
+    if (filter.trim().length === 0) return base;
+    const f = filter.trim().toLowerCase();
+    return base.filter((e) => e.name.toLowerCase().includes(f));
+  }, [data, filter]);
+
+  const handleEntryClick = (e: BrowseEntry) => {
+    if (!data) return;
+    void browse(joinPath(data.path, e.name));
+  };
+
+  const handleEntryDoubleClick = (e: BrowseEntry) => {
+    if (!data) return;
+    onSelect(joinPath(data.path, e.name));
+  };
+
+  const openCreate = () => {
+    setCreating(true);
+    setNewFolderName('');
+    setCreatingError(null);
+    // Focus on next tick so the input is mounted.
+    setTimeout(() => newFolderRef.current?.focus(), 0);
+  };
+
+  const cancelCreate = () => {
+    setCreating(false);
+    setNewFolderName('');
+    setCreatingError(null);
+  };
+
+  const submitCreate = async () => {
+    if (!data || creatingPending) return;
+    const name = newFolderName.trim();
+    if (name.length === 0) return;
+    setCreatingPending(true);
+    setCreatingError(null);
+    try {
+      const created = await api.mkdir(data.path, name);
+      // Refresh the listing so the new folder shows up + then
+      // navigate into it (most likely intent for "new project root").
+      await browse(created.path);
+      setCreating(false);
+      setNewFolderName('');
+    } catch (e) {
+      setCreatingError((e as Error).message);
+    } finally {
+      setCreatingPending(false);
+    }
+  };
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-6"
       onClick={onCancel}
     >
       <div
-        className="bg-bg-panel w-[640px] max-h-[70vh] flex flex-col rounded-lg border border-border shadow-2xl"
+        className="bg-bg border border-border-strong w-[820px] max-w-full h-[640px] max-h-[90vh] flex rounded-lg shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-4 border-b border-border">
-          <h2 className="text-lg font-medium">Open project folder</h2>
-          <button
-            onClick={onCancel}
-            className="text-zinc-400 hover:text-zinc-200"
-            aria-label="close"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-bg-subtle">
-          <button
-            onClick={() => data?.parent && browse(data.parent)}
-            disabled={!data?.parent}
-            className="text-zinc-400 hover:text-zinc-200 disabled:opacity-40"
-            aria-label="go up"
-          >
-            <ChevronUp size={16} />
-          </button>
-          <code className="text-sm text-zinc-300 truncate flex-1">{data?.path ?? '…'}</code>
-        </div>
-
-        <div className="flex-1 overflow-y-auto scrollbar-thin">
-          {loading && <div className="p-6 text-sm text-zinc-400">Loading…</div>}
-          {error && <div className="p-6 text-sm text-red-400">{error}</div>}
-          {!loading &&
-            !error &&
-            data &&
-            data.entries
-              .filter((e) => e.isDir && !e.isHidden)
-              .map((entry) => (
+        {/* Sidebar — quick shortcuts */}
+        <aside className="w-44 shrink-0 bg-bg-subtle/50 border-r border-border-strong flex flex-col">
+          <div className="px-3 py-3 border-b border-border-strong">
+            <h3 className="text-[10px] uppercase tracking-widest font-mono font-semibold text-zinc-400">
+              Shortcuts
+            </h3>
+          </div>
+          <ul className="flex-1 overflow-y-auto scrollbar-thin py-1">
+            {shortcuts.map((s) => (
+              <li key={s.path}>
                 <button
-                  key={entry.name}
-                  onDoubleClick={() => browse(joinPath(data.path, entry.name))}
-                  onClick={() => browse(joinPath(data.path, entry.name))}
+                  type="button"
+                  onClick={() => browse(s.path)}
                   className={cn(
-                    'flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-bg-elevated',
-                    'border-l-2 border-transparent',
+                    'group w-full flex items-center gap-2 px-3 py-1.5 text-[12px] font-mono text-zinc-300 hover:bg-bg-elevated hover:text-zinc-100 transition-colors',
+                    data?.path === s.path && 'bg-cyan-950/30 text-cyan-200',
                   )}
                 >
-                  <Folder size={16} className="text-zinc-500" />
-                  <span>{entry.name}</span>
+                  <span className="text-zinc-500 group-hover:text-cyan-300 shrink-0">
+                    {s.icon}
+                  </span>
+                  <span className="truncate">{s.label}</span>
                 </button>
-              ))}
-          {!loading &&
-            !error &&
-            data &&
-            data.entries.filter((e) => e.isDir && !e.isHidden).length === 0 && (
-              <div className="p-6 text-sm text-zinc-500">(no subfolders)</div>
-            )}
-        </div>
+              </li>
+            ))}
+          </ul>
+          <div className="px-3 py-2 border-t border-border-strong text-[10px] font-mono text-zinc-600 leading-relaxed">
+            <span className="block mb-0.5">⌘ keys:</span>
+            <span className="block">
+              <kbd className="px-1 bg-bg-elevated rounded text-zinc-400">/</kbd> filter
+            </span>
+            <span className="block">
+              <kbd className="px-1 bg-bg-elevated rounded text-zinc-400">↵</kbd> open folder
+            </span>
+            <span className="block">
+              <kbd className="px-1 bg-bg-elevated rounded text-zinc-400">esc</kbd> cancel
+            </span>
+          </div>
+        </aside>
 
-        <div className="flex items-center justify-between p-4 border-t border-border bg-bg-subtle">
-          <code className="text-xs text-zinc-500 truncate flex-1 mr-4">{data?.path}</code>
-          <div className="flex gap-2">
+        {/* Main */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Header */}
+          <header className="px-5 py-3 border-b border-border-strong flex items-center gap-2">
+            <FolderOpen size={16} className="text-cyan-400 shrink-0" />
+            <h2 className="text-[14px] font-mono font-semibold text-zinc-100">
+              Open project folder
+            </h2>
+            <span className="flex-1" />
             <button
+              type="button"
               onClick={onCancel}
-              className="px-3 py-1.5 text-sm rounded border border-border hover:bg-bg-elevated"
+              className="text-zinc-500 hover:text-zinc-100 w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated"
+              aria-label="close"
+            >
+              <X size={14} />
+            </button>
+          </header>
+
+          {/* Breadcrumb */}
+          <div className="px-5 py-2 border-b border-border bg-bg-subtle/30 flex items-center gap-0.5 text-[11px] font-mono overflow-x-auto scrollbar-thin">
+            {breadcrumb.map((seg, i) => (
+              <span key={seg.path} className="flex items-center gap-0.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => browse(seg.path)}
+                  className={cn(
+                    'px-1.5 py-0.5 rounded hover:bg-bg-elevated transition-colors',
+                    i === breadcrumb.length - 1
+                      ? 'text-zinc-100 font-semibold'
+                      : 'text-zinc-400 hover:text-zinc-100',
+                  )}
+                >
+                  {seg.label}
+                </button>
+                {i < breadcrumb.length - 1 && (
+                  <ChevronRight size={11} className="text-zinc-700" />
+                )}
+              </span>
+            ))}
+          </div>
+
+          {/* Filter / new-folder bar */}
+          <div className="border-b border-border">
+            <div className="px-5 py-2 flex items-center gap-2">
+              {creating ? (
+                <>
+                  <FolderPlus size={12} className="text-cyan-400 shrink-0" />
+                  <input
+                    ref={newFolderRef}
+                    type="text"
+                    value={newFolderName}
+                    onChange={(e) => {
+                      setNewFolderName(e.target.value);
+                      setCreatingError(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void submitCreate();
+                      if (e.key === 'Escape') cancelCreate();
+                    }}
+                    placeholder="new folder name…"
+                    disabled={creatingPending}
+                    className={cn(
+                      'flex-1 bg-transparent text-[12px] font-mono text-zinc-100 placeholder-zinc-600 focus:outline-none disabled:opacity-50',
+                      newFolderName.length > 0 &&
+                        !isValidFolderName(newFolderName) &&
+                        'text-red-300',
+                    )}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void submitCreate()}
+                    disabled={
+                      creatingPending ||
+                      newFolderName.trim().length === 0 ||
+                      !isValidFolderName(newFolderName)
+                    }
+                    className="shrink-0 px-2 py-0.5 rounded text-[10px] font-mono border border-cyan-700 bg-cyan-900/40 text-cyan-200 hover:bg-cyan-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {creatingPending ? 'creating…' : 'create'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={cancelCreate}
+                    disabled={creatingPending}
+                    className="shrink-0 text-zinc-500 hover:text-zinc-200 disabled:opacity-50"
+                    aria-label="cancel"
+                  >
+                    <X size={11} />
+                  </button>
+                </>
+              ) : (
+              <>
+                <Search size={12} className="text-zinc-500 shrink-0" />
+                <input
+                  ref={filterRef}
+                  type="text"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && visibleEntries.length === 1) {
+                      handleEntryClick(visibleEntries[0]!);
+                    }
+                  }}
+                  placeholder="filter folders…"
+                  className="flex-1 bg-transparent text-[12px] font-mono text-zinc-200 placeholder-zinc-600 focus:outline-none"
+                />
+                {filter && (
+                  <button
+                    type="button"
+                    onClick={() => setFilter('')}
+                    className="text-zinc-500 hover:text-zinc-200 shrink-0"
+                    aria-label="clear filter"
+                  >
+                    <X size={11} />
+                  </button>
+                )}
+                <span className="text-[10px] font-mono text-zinc-600 tabular-nums shrink-0">
+                  {visibleEntries.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={openCreate}
+                  disabled={!data}
+                  className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono border border-border bg-bg-elevated/40 text-zinc-300 hover:bg-bg-elevated/70 disabled:opacity-50"
+                  title="Create a new folder inside the current directory"
+                >
+                  <FolderPlus size={11} />
+                  new folder
+                </button>
+              </>
+            )}
+            </div>
+            {/* Hint / live validation strip — only when creating. Shows
+                the rule + the cleaned slug suggestion + any server
+                error in one consistent row. */}
+            {creating && (
+              <div className="px-5 pb-2 -mt-1 flex items-center gap-2 text-[10px] font-mono">
+                {creatingError ? (
+                  <span className="text-red-400 truncate" title={creatingError}>
+                    ⚠ {creatingError}
+                  </span>
+                ) : newFolderName.length > 0 &&
+                  !isValidFolderName(newFolderName) ? (
+                  <span className="text-amber-400">
+                    only letters, digits, spaces, dots, underscores, hyphens
+                  </span>
+                ) : (
+                  <span className="text-zinc-600">
+                    e.g.{' '}
+                    <code className="text-zinc-400">kick-crm</code>,{' '}
+                    <code className="text-zinc-400">my new project</code>,{' '}
+                    <code className="text-zinc-400">api_v2</code>
+                  </span>
+                )}
+                {/* Slug suggestion when the name has spaces/uppercase/etc. */}
+                {newFolderName.length > 0 &&
+                  isValidFolderName(newFolderName) &&
+                  newFolderName !== slugifyFolderName(newFolderName) && (
+                    <span className="ml-auto text-zinc-500 inline-flex items-center gap-1.5">
+                      use
+                      <button
+                        type="button"
+                        onClick={() => setNewFolderName(slugifyFolderName(newFolderName))}
+                        className="text-cyan-400 hover:text-cyan-300 underline"
+                      >
+                        {slugifyFolderName(newFolderName)}
+                      </button>
+                      ?
+                    </span>
+                  )}
+              </div>
+            )}
+          </div>
+
+          {/* List */}
+          <div className="flex-1 overflow-y-auto scrollbar-thin">
+            {loading && (
+              <div className="p-6 flex items-center gap-2 text-[12px] font-mono text-zinc-500">
+                <Loader2 size={14} className="animate-spin" />
+                Loading…
+              </div>
+            )}
+            {error && (
+              <div className="p-6 text-[12px] font-mono text-red-400">{error}</div>
+            )}
+            {!loading && !error && visibleEntries.length === 0 && (
+              <div className="p-6 text-[12px] font-mono text-zinc-500 italic">
+                {filter ? `No matches for "${filter}".` : '(no subfolders)'}
+              </div>
+            )}
+            {!loading && !error && (
+              <ul>
+                {visibleEntries.map((e) => (
+                  <FolderRow
+                    key={e.name}
+                    entry={e}
+                    onClick={() => handleEntryClick(e)}
+                    onDoubleClick={() => handleEntryDoubleClick(e)}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Footer */}
+          <footer className="px-5 py-3 border-t border-border-strong bg-bg-subtle/30 flex items-center gap-3">
+            <code className="flex-1 min-w-0 text-[11px] font-mono text-zinc-400 truncate" title={data?.path}>
+              {data?.path ?? '…'}
+            </code>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-3 py-1.5 text-[11px] font-mono rounded border border-border bg-bg-elevated/40 text-zinc-300 hover:bg-bg-elevated/70"
             >
               Cancel
             </button>
             <button
+              type="button"
               onClick={() => data && onSelect(data.path)}
               disabled={!data}
-              className="px-3 py-1.5 text-sm rounded bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-50 flex items-center gap-1"
+              className="px-3 py-1.5 text-[11px] font-mono font-medium rounded border border-cyan-600 bg-cyan-700 text-white hover:bg-cyan-600 disabled:opacity-50 inline-flex items-center gap-1.5"
             >
-              <FolderOpen size={14} />
+              <FolderOpen size={12} />
               Open this folder
             </button>
-          </div>
+          </footer>
         </div>
       </div>
     </div>
   );
 }
 
+function FolderRow({
+  entry,
+  onClick,
+  onDoubleClick,
+}: {
+  entry: BrowseEntry;
+  onClick: () => void;
+  onDoubleClick: () => void;
+}) {
+  const isProject = entry.signals.length > 0;
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+        className={cn(
+          'group w-full flex items-center gap-2.5 px-5 py-2 text-left hover:bg-bg-elevated transition-colors border-l-2',
+          isProject ? 'border-l-cyan-700/50' : 'border-l-transparent',
+        )}
+      >
+        {isProject ? (
+          <FolderGit2 size={14} className="shrink-0 text-cyan-400" />
+        ) : (
+          <Folder size={14} className="shrink-0 text-zinc-500 group-hover:text-zinc-300" />
+        )}
+        <span className="flex-1 min-w-0 text-[12px] font-mono text-zinc-200 truncate">
+          {entry.name}
+        </span>
+        <SignalBadges signals={entry.signals} />
+      </button>
+    </li>
+  );
+}
+
+const SIGNAL_META: Record<
+  ProjectSignal,
+  { label: string; icon: React.ReactNode; color: string; title: string }
+> = {
+  git: {
+    label: 'git',
+    icon: <GitBranch size={9} />,
+    color: 'bg-orange-950/40 text-orange-300 border-orange-800/50',
+    title: 'git repository',
+  },
+  selfclaude: {
+    label: 'sc',
+    icon: <Sparkles size={9} />,
+    color: 'bg-cyan-950/40 text-cyan-300 border-cyan-800/50',
+    title: 'has SelfClaude session',
+  },
+  node: {
+    label: 'node',
+    icon: null,
+    color: 'bg-emerald-950/40 text-emerald-300 border-emerald-800/50',
+    title: 'package.json present',
+  },
+  rust: {
+    label: 'rust',
+    icon: null,
+    color: 'bg-amber-950/40 text-amber-300 border-amber-800/50',
+    title: 'Cargo.toml present',
+  },
+  python: {
+    label: 'py',
+    icon: null,
+    color: 'bg-blue-950/40 text-blue-300 border-blue-800/50',
+    title: 'pyproject.toml present',
+  },
+  go: {
+    label: 'go',
+    icon: null,
+    color: 'bg-sky-950/40 text-sky-300 border-sky-800/50',
+    title: 'go.mod present',
+  },
+};
+
+function SignalBadges({ signals }: { signals: ProjectSignal[] }) {
+  if (signals.length === 0) return null;
+  // Order: selfclaude first (most relevant for our flow), then language,
+  // then git. Operator scans for "already a SelfClaude project" first.
+  const order: ProjectSignal[] = ['selfclaude', 'node', 'rust', 'python', 'go', 'git'];
+  const sorted = signals
+    .slice()
+    .sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  return (
+    <span className="flex items-center gap-1 shrink-0">
+      {sorted.map((s) => {
+        const m = SIGNAL_META[s];
+        return (
+          <span
+            key={s}
+            className={cn(
+              'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono uppercase tracking-wide border',
+              m.color,
+            )}
+            title={m.title}
+          >
+            {m.icon}
+            {m.label}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 function joinPath(parent: string, name: string): string {
   return parent === '/' ? `/${name}` : `${parent}/${name}`;
+}
+
+/**
+ * Mirror of the server-side regex (web-api.ts /api/browse/mkdir):
+ * letters, digits, spaces, dots, underscores, hyphens. No slashes,
+ * no traversal segments. Used for client-side pre-validation so the
+ * "create" button disables before the operator hits a 400.
+ */
+function isValidFolderName(name: string): boolean {
+  const trimmed = name.trim();
+  if (trimmed.length === 0 || trimmed.length > 64) return false;
+  if (trimmed === '.' || trimmed === '..') return false;
+  if (/[/\\]/.test(trimmed)) return false;
+  return /^[A-Za-z0-9._ -]+$/.test(trimmed);
+}
+
+/**
+ * Suggest a kebab-case slug for the operator-typed name — useful when
+ * the name has spaces or capitals and a sluggy version would be
+ * shell-friendlier. Lowercase, spaces → hyphens, collapse runs.
+ */
+function slugifyFolderName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-.]+/, '')
+    .replace(/[-.]+$/, '');
 }

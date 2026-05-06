@@ -9,25 +9,50 @@ import {
   type Role,
 } from './types.js';
 import {
+  ApplyAgentDnaHttpRequestSchema,
   AskUserHttpRequestSchema,
+  ConfirmItemDoneHttpRequestSchema,
+  ProposeItemDoneHttpRequestSchema,
+  ProposeScriptHttpRequestSchema,
+  RegisterPhaseItemsHttpRequestSchema,
+  RejectItemDoneHttpRequestSchema,
   RequestApprovalHttpRequestSchema,
   WritePhaseDocHttpRequestSchema,
+  type ApplyAgentDnaHttpRequest,
+  type ApplyAgentDnaHttpResponse,
   type AskUserHttpRequest,
+  type ConfirmItemDoneHttpRequest,
+  type PhaseTrackerHttpResponse,
+  type ProposeItemDoneHttpRequest,
+  type ProposeScriptHttpRequest,
+  type ProposeScriptHttpResponse,
+  type RegisterPhaseItemsHttpRequest,
+  type RejectItemDoneHttpRequest,
   type RequestApprovalHttpRequest,
   type WritePhaseDocHttpRequest,
 } from '../mcp/types.js';
 import { log } from '../lib/log.js';
 
 export interface HookCallbacks {
-  onStop: (role: Role, payload: unknown) => void;
+  onStop: (role: Role, agent: string, payload: unknown) => void;
   onPreToolUse: (
     role: Role,
+    agent: string,
     payload: { tool_name: string; tool_input: unknown },
   ) => Promise<{ decision: PermissionDecision; reason?: string }>;
-  onUserPromptSubmit: (role: Role, payload: unknown) => string;
+  onUserPromptSubmit: (role: Role, agent: string, payload: unknown) => string;
   onAskUser: (req: AskUserHttpRequest) => Promise<{ answer: string }>;
   onRequestApproval: (req: RequestApprovalHttpRequest) => Promise<{ decision: 'allow' | 'deny' }>;
   onWritePhaseDoc: (req: WritePhaseDocHttpRequest) => Promise<{ path: string }>;
+  /* Phase tracker family — see `mcp/types.ts` for schema details. */
+  onRegisterPhaseItems: (req: RegisterPhaseItemsHttpRequest) => Promise<PhaseTrackerHttpResponse>;
+  onProposeItemDone: (req: ProposeItemDoneHttpRequest) => Promise<PhaseTrackerHttpResponse>;
+  onConfirmItemDone: (req: ConfirmItemDoneHttpRequest) => Promise<PhaseTrackerHttpResponse>;
+  onRejectItemDone: (req: RejectItemDoneHttpRequest) => Promise<PhaseTrackerHttpResponse>;
+  /** Apply a bundled DNA template to this project — see `agents/dna.ts`. */
+  onApplyAgentDna: (req: ApplyAgentDnaHttpRequest) => Promise<ApplyAgentDnaHttpResponse>;
+  /** Sup-only: propose a recurring Bash command as a reusable script. */
+  onProposeScript: (req: ProposeScriptHttpRequest) => Promise<ProposeScriptHttpResponse>;
 }
 
 export interface HookServerHandle {
@@ -36,30 +61,43 @@ export interface HookServerHandle {
   port: number;
 }
 
-const QuerySchema = z.object({ role: RoleSchema });
+const QuerySchema = z.object({
+  role: RoleSchema,
+  /**
+   * Specialist identity injected by `selfclaude` via env → hook script
+   * → query string. Falls back to `role` for legacy callers. Required so
+   * file locks and tool attribution stay correct under parallel
+   * dispatch where two subprocesses share `role='developer'`.
+   */
+  agent: z.string().min(1).optional(),
+});
 
 export function buildHookServer(callbacks: HookCallbacks): FastifyInstance {
   const server = Fastify({ logger: false });
 
   server.post('/hook/stop', async (req, reply) => {
-    const role = QuerySchema.parse(req.query).role;
+    const parsedQuery = QuerySchema.parse(req.query);
+    const role = parsedQuery.role;
+    const agent = parsedQuery.agent ?? role;
     const parsed = StopHookPayloadSchema.safeParse(req.body);
     if (!parsed.success) {
       log('warn', 'hook.stop.invalid', { reason: parsed.error.message });
       return reply.code(204).send();
     }
-    callbacks.onStop(role, parsed.data);
+    callbacks.onStop(role, agent, parsed.data);
     return reply.code(204).send();
   });
 
   server.post('/hook/pretool', async (req, reply) => {
-    const role = QuerySchema.parse(req.query).role;
+    const parsedQuery = QuerySchema.parse(req.query);
+    const role = parsedQuery.role;
+    const agent = parsedQuery.agent ?? role;
     const parsed = PreToolUsePayloadSchema.safeParse(req.body);
     if (!parsed.success) {
       log('warn', 'hook.pretool.invalid', { reason: parsed.error.message });
       return reply.send({});
     }
-    const { decision, reason } = await callbacks.onPreToolUse(role, {
+    const { decision, reason } = await callbacks.onPreToolUse(role, agent, {
       tool_name: parsed.data.tool_name,
       tool_input: parsed.data.tool_input,
     });
@@ -73,13 +111,15 @@ export function buildHookServer(callbacks: HookCallbacks): FastifyInstance {
   });
 
   server.post('/hook/prompt', async (req, reply) => {
-    const role = QuerySchema.parse(req.query).role;
+    const parsedQuery = QuerySchema.parse(req.query);
+    const role = parsedQuery.role;
+    const agent = parsedQuery.agent ?? role;
     const parsed = UserPromptSubmitPayloadSchema.safeParse(req.body);
     if (!parsed.success) {
       log('warn', 'hook.prompt.invalid', { reason: parsed.error.message });
       return reply.send({});
     }
-    const additionalContext = callbacks.onUserPromptSubmit(role, parsed.data);
+    const additionalContext = callbacks.onUserPromptSubmit(role, agent, parsed.data);
     if (!additionalContext) return reply.send({});
     return reply.send({
       hookSpecificOutput: {
@@ -117,6 +157,94 @@ export function buildHookServer(callbacks: HookCallbacks): FastifyInstance {
       return reply.send(result);
     } catch (e) {
       log('warn', 'mcp.write_phase_doc.failed', { reason: (e as Error).message });
+      return reply.code(500).send({ error: (e as Error).message });
+    }
+  });
+
+  // Phase tracker family. Each handler returns `{ ok, message }` so the
+  // bridge can either surface the message text back to the agent on
+  // success or throw on failure (the orchestrator's domain validation
+  // — e.g. "no such phase / item" — flows through `ok: false`).
+  server.post('/mcp/register_phase_items', async (req, reply) => {
+    const parsed = RegisterPhaseItemsHttpRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.message });
+    }
+    try {
+      const result = await callbacks.onRegisterPhaseItems(parsed.data);
+      return reply.send(result);
+    } catch (e) {
+      log('warn', 'mcp.register_phase_items.failed', { reason: (e as Error).message });
+      return reply.code(500).send({ error: (e as Error).message });
+    }
+  });
+
+  server.post('/mcp/propose_item_done', async (req, reply) => {
+    const parsed = ProposeItemDoneHttpRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.message });
+    }
+    try {
+      const result = await callbacks.onProposeItemDone(parsed.data);
+      return reply.send(result);
+    } catch (e) {
+      log('warn', 'mcp.propose_item_done.failed', { reason: (e as Error).message });
+      return reply.code(500).send({ error: (e as Error).message });
+    }
+  });
+
+  server.post('/mcp/confirm_item_done', async (req, reply) => {
+    const parsed = ConfirmItemDoneHttpRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.message });
+    }
+    try {
+      const result = await callbacks.onConfirmItemDone(parsed.data);
+      return reply.send(result);
+    } catch (e) {
+      log('warn', 'mcp.confirm_item_done.failed', { reason: (e as Error).message });
+      return reply.code(500).send({ error: (e as Error).message });
+    }
+  });
+
+  server.post('/mcp/reject_item_done', async (req, reply) => {
+    const parsed = RejectItemDoneHttpRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.message });
+    }
+    try {
+      const result = await callbacks.onRejectItemDone(parsed.data);
+      return reply.send(result);
+    } catch (e) {
+      log('warn', 'mcp.reject_item_done.failed', { reason: (e as Error).message });
+      return reply.code(500).send({ error: (e as Error).message });
+    }
+  });
+
+  server.post('/mcp/apply_agent_dna', async (req, reply) => {
+    const parsed = ApplyAgentDnaHttpRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.message });
+    }
+    try {
+      const result = await callbacks.onApplyAgentDna(parsed.data);
+      return reply.send(result);
+    } catch (e) {
+      log('warn', 'mcp.apply_agent_dna.failed', { reason: (e as Error).message });
+      return reply.code(500).send({ error: (e as Error).message });
+    }
+  });
+
+  server.post('/mcp/propose_script', async (req, reply) => {
+    const parsed = ProposeScriptHttpRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.message });
+    }
+    try {
+      const result = await callbacks.onProposeScript(parsed.data);
+      return reply.send(result);
+    } catch (e) {
+      log('warn', 'mcp.propose_script.failed', { reason: (e as Error).message });
       return reply.code(500).send({ error: (e as Error).message });
     }
   });

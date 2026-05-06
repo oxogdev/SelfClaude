@@ -17,6 +17,8 @@ export interface ConversationResult {
   totalTurns: { supervisor: number; developer: number };
   supervisorSessionId: string | null;
   developerSessionId: string | null;
+  /** Per-agent CC session ids carried over the conversation. */
+  agentSessions: Record<string, string | null>;
   endedReason: ConversationEndedReason;
   /** Last underlying loop turn — useful for callers that want supervisorText / developerText. */
   lastTurn: LoopTurnResult | null;
@@ -44,7 +46,14 @@ export async function runConversationTurn(opts: ConversationOptions): Promise<Co
   const orch = opts.orchestrator;
 
   let supSession = opts.supervisorSessionId;
-  let devSession = opts.developerSessionId;
+  // Carry per-agent session ids across iterations so each specialist
+  // resumes its conversation rather than starting fresh.
+  const agentSessions: Record<string, string | null> = {
+    ...(opts.agentSessions ?? {}),
+  };
+  if (opts.developerSessionId && !agentSessions.developer) {
+    agentSessions.developer = opts.developerSessionId;
+  }
   let prompt = opts.userPrompt;
   let iter = 0;
   let supTurns = 0;
@@ -57,11 +66,11 @@ export async function runConversationTurn(opts: ConversationOptions): Promise<Co
       ...opts,
       userPrompt: prompt,
       supervisorSessionId: supSession ?? undefined,
-      developerSessionId: devSession ?? undefined,
+      agentSessions,
     });
     lastTurn = turn;
     supSession = turn.supervisorSessionId ?? supSession;
-    devSession = turn.developerSessionId ?? devSession;
+    Object.assign(agentSessions, turn.agentSessions);
     supTurns += 1;
     if (turn.developerExecuted) devTurns += 1;
     iter += 1;
@@ -74,13 +83,14 @@ export async function runConversationTurn(opts: ConversationOptions): Promise<Co
       endedReason = 'pending-approval';
       break;
     }
-    if (!turn.developerExecuted) {
+    if (!turn.anyAgentExecuted) {
       endedReason = 'idle';
       break;
     }
-    // The developer just executed; their report is now queued in the
-    // supervisor inbox. Re-call the supervisor with a synthetic prompt so
-    // the next turn drains the inbox and decides what to do next.
+    // At least one agent (developer or specialist) just executed; their
+    // report is now queued in the supervisor's inbox. Re-call the
+    // supervisor with a synthetic prompt so the next turn drains the
+    // inbox and decides what to do next.
     prompt = SYNTHETIC_CONTINUE_PROMPT;
   }
 
@@ -102,7 +112,8 @@ export async function runConversationTurn(opts: ConversationOptions): Promise<Co
     iterations: iter,
     totalTurns: { supervisor: supTurns, developer: devTurns },
     supervisorSessionId: supSession ?? null,
-    developerSessionId: devSession ?? null,
+    developerSessionId: agentSessions.developer ?? null,
+    agentSessions,
     endedReason,
     lastTurn,
   };

@@ -6,13 +6,14 @@ set -uo pipefail
 
 INPUT="$(cat)"
 ROLE="${SELFCLAUDE_ROLE:-unknown}"
+AGENT="${SELFCLAUDE_AGENT:-$ROLE}"
 URL="${SELFCLAUDE_ORCH_URL:-}"
 
 if [ -n "$URL" ]; then
   curl -fsS --max-time 5 \
     -X POST -H 'Content-Type: application/json' \
     -d "$INPUT" \
-    "${URL}/hook/stop?role=${ROLE}" \
+    "${URL}/hook/stop?role=${ROLE}&agent=${AGENT}" \
     >/dev/null 2>&1 || true
 fi
 

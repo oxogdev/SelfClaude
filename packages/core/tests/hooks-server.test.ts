@@ -10,6 +10,12 @@ function noopCallbacks(overrides: Partial<HookCallbacks> = {}): HookCallbacks {
     onAskUser: async () => ({ answer: '' }),
     onRequestApproval: async () => ({ decision: 'deny' }),
     onWritePhaseDoc: async () => ({ path: '/dev/null' }),
+    onRegisterPhaseItems: async () => ({ ok: true, message: '' }),
+    onProposeItemDone: async () => ({ ok: true, message: '' }),
+    onConfirmItemDone: async () => ({ ok: true, message: '' }),
+    onRejectItemDone: async () => ({ ok: true, message: '' }),
+    onApplyAgentDna: async () => ({ ok: true, message: '' }),
+    onProposeScript: async () => ({ ok: true, message: '' }),
     ...overrides,
   };
 }

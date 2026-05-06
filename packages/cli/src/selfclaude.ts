@@ -124,9 +124,14 @@ async function runWebMode(opts: {
   const api = await startWebApi({ port: opts.apiPort });
   console.log(`✓ SelfClaude Web API: ${api.url}`);
 
+  // `detached: true` makes nextProc a process group leader so we can later
+  // signal -nextProc.pid and reach every worker Next.js forks (SWC, RSC
+  // compiler, etc.). Without this, killing the parent leaves orphan
+  // workers holding the dev port.
   const nextProc = spawn(NEXT_BIN, ['dev', '--port', String(opts.nextPort)], {
     stdio: 'inherit',
     cwd: WEB_DIR,
+    detached: true,
   });
 
   const browserUrl = `http://127.0.0.1:${opts.nextPort}/`;
@@ -153,13 +158,29 @@ async function runWebMode(opts: {
       process.exit(1);
     }, 3000);
     try {
-      nextProc.kill('SIGTERM');
-      // If next dev clings to SIGTERM, escalate to SIGKILL after a short grace.
+      // Negative PID = signal the whole process group (SWC workers, etc.).
+      if (nextProc.pid) {
+        try {
+          process.kill(-nextProc.pid, 'SIGTERM');
+        } catch {
+          // Group send failed (process already dead, or Windows): fall back to direct.
+          try {
+            nextProc.kill('SIGTERM');
+          } catch {
+            /* already gone */
+          }
+        }
+      }
+      // Escalate after 1.5s if SIGTERM didn't take.
       setTimeout(() => {
         try {
-          nextProc.kill('SIGKILL');
+          if (nextProc.pid) process.kill(-nextProc.pid, 'SIGKILL');
         } catch {
-          /* already gone */
+          try {
+            nextProc.kill('SIGKILL');
+          } catch {
+            /* already gone */
+          }
         }
       }, 1500);
     } catch {
@@ -223,8 +244,13 @@ program
   .description('Show SelfClaude daemon logs')
   .option('-f, --follow', 'follow log output')
   .option('-n, --lines <n>', 'number of lines to show (default 100)', '100')
-  .action((opts: { follow?: boolean; lines?: string }) => {
-    daemonLogs({ follow: opts.follow, lines: opts.lines ? Number(opts.lines) : undefined });
+  .option('-o, --orchestrator', 'show structured orchestrator events instead of daemon stdout')
+  .action((opts: { follow?: boolean; lines?: string; orchestrator?: boolean }) => {
+    daemonLogs({
+      follow: opts.follow,
+      lines: opts.lines ? Number(opts.lines) : undefined,
+      orchestrator: opts.orchestrator,
+    });
   });
 
 program

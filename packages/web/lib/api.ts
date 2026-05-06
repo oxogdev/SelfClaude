@@ -1,4 +1,159 @@
-import type { BrowseResult, Favorite, SessionMeta, SessionSnapshot } from './types';
+import type {
+  BrowseResult,
+  ChatLogEntry,
+  Favorite,
+  PhaseTrackerFile,
+  ScriptsFile,
+  SessionMeta,
+  SessionSnapshot,
+} from './types';
+
+export interface ProjectTreeFile {
+  path: string;
+  name: string;
+  size: number;
+}
+
+export interface ProjectTreeGroup {
+  group: 'project' | 'selfclaude' | 'root';
+  label: string;
+  files: ProjectTreeFile[];
+}
+
+export interface ProjectTree {
+  cwd: string;
+  groups: ProjectTreeGroup[];
+}
+
+export interface ProjectFile {
+  path: string;
+  size: number;
+  content: string;
+}
+
+export interface StackItem {
+  category: string;
+  name: string;
+  value: string;
+  version: string;
+  locked: boolean;
+  notes: string;
+}
+
+export interface StackFile {
+  version: 1;
+  updatedAt: string;
+  items: StackItem[];
+}
+
+export interface PhaseProgress {
+  filename: string;
+  title: string;
+  /** Total number of `- [ ]` / `- [x]` checkboxes in the phase doc. */
+  totalItems: number;
+  /** Number of those that are checked off. */
+  completedItems: number;
+  /** Outline tree built from headings + checkboxes (no plain prose). */
+  tree: PhaseNode[];
+}
+
+/* Phase tracker types live in `./types.ts` so SessionEvent can reference
+ * them without an import cycle. Re-exported here for consumer ergonomics. */
+export type {
+  ConfirmEvidence,
+  PhaseItem,
+  PhaseItemStatus,
+  PhaseTrackerFile,
+  PhaseTrackerPhase,
+} from './types';
+
+/** One row in the unified memory overview. Mirrors the server shape. */
+export interface MemoryOverviewEntry {
+  /** Layer this entry belongs to; routes click → read/write API. */
+  kind: 'project' | 'shared' | 'auto' | 'user-global';
+  /** Display name (basename for project/shared/auto, full path for user-global). */
+  name: string;
+  /** Identifier used for read/write — relative path for project/shared, bare name for auto, absolute path for user-global. */
+  ref: string;
+  size: number;
+  /** First ~200 chars of content (or first paragraph) for at-a-glance UI. */
+  preview: string;
+  editable: boolean;
+}
+
+/**
+ * One node in a phase-doc outline. Either a heading (`section`) which
+ * groups children, or a checkbox (`checkbox`) which is a leaf with a
+ * done flag. Plain bullets and prose are dropped on the server side so
+ * the tree stays an actionable outline, not a re-render.
+ */
+export interface PhaseNode {
+  kind: 'section' | 'checkbox';
+  text: string;
+  /** For sections: 2 (`##`), 3 (`###`), 4 (`####`)… */
+  level?: number;
+  /** For checkboxes only. */
+  done?: boolean;
+  /** Source line index in the markdown for traceability. */
+  line: number;
+  children: PhaseNode[];
+}
+
+/**
+ * One row in the Settings modal's prompt-editor list. `currentContent`
+ * is what the agent actually loads at runtime; `defaultContent` is the
+ * bundled shipped version used as the diff baseline / "reset to default"
+ * target.
+ */
+export interface SystemPromptInfo {
+  agent: string;
+  label: string;
+  accent: string;
+  readOnly: boolean;
+  description: string;
+  source: 'override' | 'default';
+  defaultContent: string;
+  currentContent: string;
+}
+
+/**
+ * Server-aggregated view of a session's full chat-log: todos from the
+ * latest TodoWrite, every file touched, every wakeup ever scheduled,
+ * every cron job. Powers the right-hand detail tabs without needing the
+ * full chat-log loaded client-side.
+ */
+export interface DerivedState {
+  todos:
+    | Array<{
+        content: string;
+        status: 'pending' | 'in_progress' | 'completed';
+        activeForm?: string;
+      }>
+    | null;
+  files: {
+    created: { path: string; ts: number }[];
+    modified: { path: string; ts: number }[];
+    read: { path: string; ts: number }[];
+  };
+  wakeups: Array<{
+    id: string;
+    role: 'supervisor' | 'developer';
+    scheduledAt: number;
+    fireAt: number;
+    reason: string;
+    status: 'pending' | 'fired' | 'cancelled';
+  }>;
+  crons: Array<{
+    id: string;
+    scheduledAt: number;
+    schedule: string;
+    description: string;
+    cronId: string | null;
+    status: 'active' | 'deleted';
+  }>;
+  /** Specialist agents currently summoned for this session (always includes 'developer'). */
+  activeAgents: string[];
+}
 
 // Direct connection to the SelfClaude Web API. Bypassing the Next.js dev
 // rewrite avoids dev-time SSE buffering that breaks token streaming.
@@ -44,8 +199,14 @@ export const api = {
   destroySession(id: string) {
     return jsonFetch<void>(`/api/sessions/${id}`, { method: 'DELETE' });
   },
-  getSession(id: string) {
-    return jsonFetch<SessionSnapshot>(`/api/sessions/${id}`);
+  getSession(id: string, opts: { limit?: number } = {}) {
+    const q = opts.limit ? `?limit=${opts.limit}` : '';
+    return jsonFetch<SessionSnapshot>(`/api/sessions/${id}${q}`);
+  },
+  getHistory(id: string, before: number, limit = 50) {
+    return jsonFetch<{ entries: ChatLogEntry[]; hasMoreHistory: boolean }>(
+      `/api/sessions/${id}/history?before=${before}&limit=${limit}`,
+    );
   },
   sendMessage(id: string, text: string) {
     return jsonFetch<{ accepted: boolean }>(`/api/sessions/${id}/message`, {
@@ -59,11 +220,189 @@ export const api = {
       body: JSON.stringify({ text }),
     });
   },
+  sendAgentMessage(id: string, agent: string, text: string) {
+    return jsonFetch<{ accepted: boolean }>(`/api/sessions/${id}/agent-message`, {
+      method: 'POST',
+      body: JSON.stringify({ agent, text }),
+    });
+  },
   answerQuestion(id: string, questionId: string, answer: string) {
     return jsonFetch<{ ok: boolean }>(`/api/sessions/${id}/answer-question`, {
       method: 'POST',
       body: JSON.stringify({ questionId, answer }),
     });
+  },
+  listProjectFiles(id: string) {
+    return jsonFetch<ProjectTree>(`/api/sessions/${id}/files`);
+  },
+  listFilesTouched(id: string) {
+    return jsonFetch<{
+      created: { path: string; ts: number }[];
+      modified: { path: string; ts: number }[];
+      read: { path: string; ts: number }[];
+    }>(`/api/sessions/${id}/files-touched`);
+  },
+  getDerivedState(id: string) {
+    return jsonFetch<DerivedState>(`/api/sessions/${id}/derived`);
+  },
+  readProjectFile(id: string, path: string) {
+    return jsonFetch<ProjectFile>(`/api/sessions/${id}/file?path=${encodeURIComponent(path)}`);
+  },
+  writeProjectFile(id: string, path: string, content: string) {
+    return jsonFetch<{ ok: true; path: string; size: number }>(
+      `/api/sessions/${id}/file`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ path, content }),
+      },
+    );
+  },
+  getPhaseProgress(id: string) {
+    return jsonFetch<{ phases: PhaseProgress[] }>(`/api/sessions/${id}/phases`);
+  },
+  getPhaseTracker(id: string) {
+    return jsonFetch<PhaseTrackerFile>(`/api/sessions/${id}/phase-tracker`);
+  },
+  /* Bash macro / script proposal endpoints. */
+  getSessionScripts(id: string) {
+    return jsonFetch<ScriptsFile>(`/api/sessions/${id}/scripts`);
+  },
+  approveScript(id: string, slug: string, notes?: string, operator = 'operator') {
+    return jsonFetch<{ ok: true; message: string }>(
+      `/api/sessions/${id}/scripts/approve`,
+      { method: 'POST', body: JSON.stringify({ slug, operator, notes }) },
+    );
+  },
+  rejectScript(id: string, slug: string, reason: string, operator = 'operator') {
+    return jsonFetch<{ ok: true; message: string }>(
+      `/api/sessions/${id}/scripts/reject`,
+      { method: 'POST', body: JSON.stringify({ slug, operator, reason }) },
+    );
+  },
+  /**
+   * Per-project MCP tool telemetry — usage counts + recent calls per
+   * tool, used by the Settings "MCP Tools" tab.
+   */
+  getMcpTelemetry(id: string) {
+    return jsonFetch<{
+      version: 1;
+      updatedAt: string;
+      tools: Record<
+        string,
+        {
+          name: string;
+          total: number;
+          success: number;
+          failure: number;
+          lastCalledAt: string | null;
+          lastFailedAt: string | null;
+          recent: {
+            ts: number;
+            agent: string;
+            success: boolean;
+            message: string;
+          }[];
+        }
+      >;
+    }>(`/api/sessions/${id}/mcp-telemetry`);
+  },
+  /**
+   * Aggregated overview of every memory layer for this session — used
+   * by the Memory panel to render previews in a single roundtrip.
+   * See `web-api.ts:readMemoryOverview`.
+   */
+  getMemoryOverview(id: string) {
+    return jsonFetch<{
+      project: MemoryOverviewEntry[];
+      shared: MemoryOverviewEntry[];
+      auto: MemoryOverviewEntry[];
+      userGlobal: MemoryOverviewEntry[];
+      encodedCwd: string;
+    }>(`/api/sessions/${id}/memory-overview`);
+  },
+  /**
+   * CC's per-cwd auto-memory bucket (`~/.claude/projects/<encoded>/memory/`)
+   * plus user-global `~/.claude/CLAUDE.md`. The supervisor sometimes
+   * writes directly here when the user says "add to memory"; the
+   * project tree wouldn't surface it because it's outside cwd.
+   */
+  getAutoMemory(id: string) {
+    return jsonFetch<{
+      encodedCwd: string;
+      dir: string;
+      entries: { name: string; size: number; preview: string }[];
+      userClaudeMd: { path: string; size: number; preview: string } | null;
+    }>(`/api/sessions/${id}/auto-memory`);
+  },
+  getAutoMemoryFile(id: string, name: string) {
+    return jsonFetch<{ name: string; size: number; content: string }>(
+      `/api/sessions/${id}/auto-memory/file/${encodeURIComponent(name)}`,
+    );
+  },
+  putAutoMemoryFile(id: string, name: string, content: string) {
+    return jsonFetch<{ ok: true; name: string; size: number }>(
+      `/api/sessions/${id}/auto-memory/file/${encodeURIComponent(name)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ content }),
+      },
+    );
+  },
+  operatorVerifyPhaseItem(
+    id: string,
+    slug: string,
+    itemId: string,
+    notes?: string,
+  ) {
+    return jsonFetch<{ ok: true; message: string }>(
+      `/api/sessions/${id}/phase-tracker/operator-verify`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ slug, itemId, notes }),
+      },
+    );
+  },
+  getStack(id: string) {
+    return jsonFetch<StackFile>(`/api/sessions/${id}/stack`);
+  },
+  saveStack(id: string, stack: StackFile) {
+    return jsonFetch<{ ok: true }>(`/api/sessions/${id}/stack`, {
+      method: 'PUT',
+      body: JSON.stringify(stack),
+    });
+  },
+  listSystemPrompts() {
+    return jsonFetch<{ prompts: SystemPromptInfo[] }>('/api/system-prompts');
+  },
+  saveSystemPrompt(agent: string, content: string) {
+    return jsonFetch<{ ok: true; path: string; size: number }>(
+      `/api/system-prompts/${encodeURIComponent(agent)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ content }),
+      },
+    );
+  },
+  resetSystemPrompt(agent: string) {
+    return jsonFetch<{ ok: true }>(
+      `/api/system-prompts/${encodeURIComponent(agent)}`,
+      { method: 'DELETE' },
+    );
+  },
+  triggerWakeup(id: string, role: 'supervisor' | 'developer') {
+    return jsonFetch<{ fired: boolean }>(`/api/sessions/${id}/wake`, {
+      method: 'POST',
+      body: JSON.stringify({ role }),
+    });
+  },
+  abortTurn(id: string, role: 'supervisor' | 'developer') {
+    return jsonFetch<{ aborted: boolean; role: 'supervisor' | 'developer' | null }>(
+      `/api/sessions/${id}/abort`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ role }),
+      },
+    );
   },
   decideApproval(id: string, approvalId: string, decision: 'allow' | 'deny') {
     return jsonFetch<{ ok: boolean }>(`/api/sessions/${id}/decide-approval`, {
@@ -74,6 +413,32 @@ export const api = {
   browse(path?: string) {
     const q = path ? `?path=${encodeURIComponent(path)}` : '';
     return jsonFetch<BrowseResult>(`/api/browse${q}`);
+  },
+  /**
+   * Lightweight check: does this cwd already have a SelfClaude
+   * project state on disk? Used by the home page to decide whether
+   * to surface the onboarding wizard (fresh project) or jump
+   * straight into the session (returning project).
+   */
+  probeProject(cwd: string) {
+    return jsonFetch<{ cwd: string; exists: boolean }>(
+      `/api/projects/probe?cwd=${encodeURIComponent(cwd)}`,
+    );
+  },
+  /**
+   * Create a new directory inside `parent`. Used by the FolderPicker's
+   * inline "new folder" UI so the operator can scaffold a fresh
+   * project root without leaving the picker. Server validates the
+   * name + refuses overwrite — surface the error to the operator.
+   */
+  mkdir(parent: string, name: string) {
+    return jsonFetch<{ path: string; parent: string; name: string }>(
+      '/api/browse/mkdir',
+      {
+        method: 'POST',
+        body: JSON.stringify({ parent, name }),
+      },
+    );
   },
   listFavorites() {
     return jsonFetch<{ favorites: Favorite[] }>('/api/favorites');
