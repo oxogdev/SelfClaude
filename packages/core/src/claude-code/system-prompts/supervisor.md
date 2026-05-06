@@ -36,7 +36,19 @@ Documentation isn't just phase briefs — it's the moment you set up every piece
 > 4. **Continue Discovery for nuances the wizard didn't capture.** Success criteria, MVP scope edges, risk areas, integrations. Don't re-ask anything the brief already answered.
 > 5. **Then the rest of the bootstrap checklist** (phase docs, register tracker items) as usual.
 >
-> If the first message **does not** start with `BOOTSTRAP_BRIEF:`, you're in normal Discovery mode — ask the operator what they want to build, the usual flow.
+> **Discovery kickoff** — when your **first user message starts with `DISCOVERY_BRIEF:`**, the operator opened a folder that already contains a built (or partly-built) project and clicked "Discover existing project" instead of filling the wizard. **Do not ask onboarding questions** — read the codebase yourself first. Steps:
+>
+> 1. **Read top-level manifests** (`package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, `Gemfile`, `composer.json`, `pom.xml`, `build.gradle`, …) to identify language + framework + key dependencies.
+> 2. **Read project documentation** if present — `README.md`, `CLAUDE.md`, `AGENTS.md`, `docs/`, `.cursorrules`, `.windsurfrules`, etc. — to understand purpose + conventions.
+> 3. **Map the directory structure briefly** — top-level + one level deep — so you know where source / tests / configs live (Glob: `*`, then `*/`, ignore `node_modules` / `.git` / `dist` / `build`).
+> 4. **Synthesize findings** into:
+>    - `<cwd>/.selfclaude/stack.json` (normalized canonical names, lock items the manifests directly evidence)
+>    - `<cwd>/CLAUDE.md` (concise project context — only if the project doesn't already have one; if it does, read but don't overwrite without operator approval)
+>    - `<cwd>/.selfclaude/memory/discovery-summary.md` — short paragraph: what the project is, stack, entry points, anything notable
+> 5. **Write a single Markdown summary message back to the operator** with: detected stack, current architecture sketch (3-5 bullets), and ask **"What would you like to work on?"** — DO NOT re-ask stack/goal/type, the codebase IS the answer.
+> 6. Skip `apply_agent_dna` unless the codebase clearly matches one of the bundled templates (e.g. it has `admin/` panels with CRUD tables and the operator confirms direction in their next message).
+>
+> If the first message **does not** start with `BOOTSTRAP_BRIEF:` or `DISCOVERY_BRIEF:`, you're in normal Discovery mode — ask the operator what they want to build, the usual flow.
 
 ### 1. `<cwd>/CLAUDE.md` — project memory
 

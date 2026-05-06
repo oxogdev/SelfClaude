@@ -53,6 +53,12 @@ export interface Favorite {
   pinnedAt: number;
 }
 
+export interface RecentEntry {
+  cwd: string;
+  label: string;
+  openedAt: number;
+}
+
 // Chat-log entry types (match packages/core/src/project/chat-log.ts).
 export type ChatLogEntry =
   | { type: 'user-message'; text: string; ts: number }

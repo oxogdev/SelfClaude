@@ -7,6 +7,7 @@ import { runConversationTurn } from '../orchestrator/conversation.js';
 import { loadDeveloperSystemPrompt } from '../orchestrator/loop.js';
 import { getAgent, loadAgentPrompt } from '../agents/registry.js';
 import { runClaudeTurn } from '../claude-code/spawn.js';
+import { recordRecent } from './recents.js';
 import {
   extractAssistantText,
   extractAssistantThinking,
@@ -424,6 +425,14 @@ export class SessionManager extends EventEmitter {
     await this.restoreWakeups(ctx);
     await this.restoreActiveAgents(ctx);
     await this.restoreMetrics(ctx);
+
+    // Record into the recents log so the landing page's "Recent" rail
+    // can surface this cwd next time. Best-effort, non-fatal.
+    try {
+      recordRecent(opts.cwd, ctx.label);
+    } catch (e) {
+      log('warn', 'recents.record_failed', { cwd: opts.cwd, error: (e as Error).message });
+    }
 
     log('info', 'session.created', { id, cwd: opts.cwd });
     this.emit('session-created', this.toMeta(ctx));

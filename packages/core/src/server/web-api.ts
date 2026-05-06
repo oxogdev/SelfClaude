@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { SessionManager } from './session-manager.js';
 import { streamSseFromEmitter } from './sse.js';
 import { addFavorite, listFavorites, removeFavorite } from './favorites.js';
+import { listRecents, removeRecent } from './recents.js';
 import { configureLogFile, log } from '../lib/log.js';
 
 export interface WebApiOptions {
@@ -523,6 +524,16 @@ export function buildWebApi(manager: SessionManager): FastifyInstance {
     const parsed = Schema.safeParse(req.query);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
     const removed = removeFavorite(parsed.data.cwd);
+    return { removed };
+  });
+
+  server.get('/api/recents', async () => ({ recents: listRecents() }));
+
+  server.delete('/api/recents', async (req, reply) => {
+    const Schema = z.object({ cwd: z.string().min(1) });
+    const parsed = Schema.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
+    const removed = removeRecent(parsed.data.cwd);
     return { removed };
   });
 

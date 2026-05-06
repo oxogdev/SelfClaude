@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, Loader2, Rocket } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Loader2, Rocket, Search } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 /**
@@ -72,6 +72,7 @@ export function NewProjectWizard({
   cwd,
   onLaunch,
   onSkip,
+  onDiscoverExisting,
   onCancel,
 }: {
   cwd: string;
@@ -79,6 +80,8 @@ export function NewProjectWizard({
   onLaunch: (submission: WizardSubmission) => Promise<void>;
   /** Called when operator wants to skip the wizard and start chat from scratch. */
   onSkip: () => Promise<void>;
+  /** Called when operator says "this project already exists, sup should discover it." */
+  onDiscoverExisting: () => Promise<void>;
   onCancel: () => void;
 }) {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
@@ -87,7 +90,7 @@ export function NewProjectWizard({
   const [goal, setGoal] = useState('');
   const [stackBrief, setStackBrief] = useState('');
   const [constraints, setConstraints] = useState('');
-  const [submitting, setSubmitting] = useState<'launch' | 'skip' | null>(null);
+  const [submitting, setSubmitting] = useState<'launch' | 'skip' | 'discover' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -135,6 +138,18 @@ export function NewProjectWizard({
     }
   };
 
+  const handleDiscover = async () => {
+    if (submitting !== null) return;
+    setSubmitting('discover');
+    setError(null);
+    try {
+      await onDiscoverExisting();
+    } catch (e) {
+      setError((e as Error).message);
+      setSubmitting(null);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6"
@@ -158,14 +173,21 @@ export function NewProjectWizard({
 
         <div className="flex-1 overflow-y-auto scrollbar-thin px-6 py-5">
           {step === 1 && (
-            <Step1Basics
-              name={name}
-              setName={setName}
-              type={type}
-              setType={setType}
-              goal={goal}
-              setGoal={setGoal}
-            />
+            <>
+              <DiscoverExistingBanner
+                onDiscover={handleDiscover}
+                pending={submitting === 'discover'}
+                disabled={submitting !== null && submitting !== 'discover'}
+              />
+              <Step1Basics
+                name={name}
+                setName={setName}
+                type={type}
+                setType={setType}
+                goal={goal}
+                setGoal={setGoal}
+              />
+            </>
           )}
           {step === 2 && (
             <Step2Stack stackBrief={stackBrief} setStackBrief={setStackBrief} />
@@ -252,6 +274,63 @@ export function NewProjectWizard({
           )}
         </footer>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Top-of-step-1 prompt for existing projects. Operators sometimes
+ * pick a folder that already has a built codebase — in that case
+ * filling out a "what should we build" wizard is wasted effort, sup
+ * can read the manifests itself. One click takes them straight to
+ * a discovery brief that tells sup to explore + summarize + ask.
+ */
+function DiscoverExistingBanner({
+  onDiscover,
+  pending,
+  disabled,
+}: {
+  onDiscover: () => void;
+  pending: boolean;
+  disabled: boolean;
+}) {
+  return (
+    <div className="mb-5 rounded-md border border-emerald-700/40 bg-emerald-950/20 p-3 flex items-start gap-3">
+      <span className="shrink-0 w-7 h-7 rounded-md bg-emerald-900/40 border border-emerald-700/40 flex items-center justify-center mt-0.5">
+        <Search size={13} className="text-emerald-300" />
+      </span>
+      <div className="flex-1 min-w-0">
+        <h4 className="text-[12px] font-mono font-semibold text-emerald-100">
+          Already-built project?
+        </h4>
+        <p className="text-[11px] text-emerald-200/70 mt-0.5 leading-relaxed">
+          If this folder already contains code, skip the wizard — sup will read
+          the manifests, map the architecture, and ask what you want to work on.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onDiscover}
+        disabled={disabled}
+        className={cn(
+          'shrink-0 text-[11px] font-mono font-medium px-3 py-1.5 rounded border inline-flex items-center gap-1.5',
+          pending
+            ? 'border-emerald-800 bg-emerald-950/40 text-emerald-400 cursor-wait'
+            : disabled
+              ? 'border-zinc-700 bg-zinc-900/40 text-zinc-600 cursor-not-allowed'
+              : 'border-emerald-600 bg-emerald-700/80 text-white hover:bg-emerald-600',
+        )}
+      >
+        {pending ? (
+          <>
+            <Loader2 size={11} className="animate-spin" /> discovering…
+          </>
+        ) : (
+          <>
+            <Search size={11} /> Discover existing
+          </>
+        )}
+      </button>
     </div>
   );
 }
@@ -540,6 +619,36 @@ function deriveDefaultName(cwd: string): string {
     .filter(Boolean)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
+}
+
+/**
+ * Build the structured `DISCOVERY_BRIEF:` first message for existing
+ * projects. Tells sup to explore the codebase rather than ask
+ * onboarding questions. Sup's prompt has a section that handles this
+ * — see supervisor.md "Discovery kickoff".
+ */
+export function buildDiscoveryBrief(cwd: string): string {
+  return [
+    'DISCOVERY_BRIEF:',
+    '',
+    `CWD: ${cwd}`,
+    '',
+    '---',
+    'This folder already contains a built (or partly-built) project — the operator clicked',
+    '"Discover existing project" instead of filling out the new-project wizard. Do NOT ask',
+    'onboarding questions (stack, goal, type). Read the codebase yourself first:',
+    '',
+    '1. Read top-level manifests (package.json, Cargo.toml, pyproject.toml, go.mod, Gemfile,',
+    '   composer.json, pom.xml, build.gradle, …) to identify language + framework + key deps.',
+    '2. Read README.md / CLAUDE.md / AGENTS.md / docs/ if present, to learn purpose + conventions.',
+    '3. Map the directory structure briefly (top-level + one level deep, ignoring node_modules /',
+    '   .git / dist / build / target).',
+    '4. Synthesize into <cwd>/.selfclaude/stack.json (canonical names, lock items the manifests',
+    '   directly evidence) and a short <cwd>/.selfclaude/memory/discovery-summary.md. Only write',
+    '   <cwd>/CLAUDE.md if one does not already exist.',
+    '5. Reply with a Markdown summary: detected stack, 3-5 bullet architecture sketch, then ask',
+    '   "What would you like to work on?" — do NOT re-ask stack/goal/type.',
+  ].join('\n');
 }
 
 /**

@@ -3,6 +3,7 @@ import type {
   ChatLogEntry,
   Favorite,
   PhaseTrackerFile,
+  RecentEntry,
   ScriptsFile,
   SessionMeta,
   SessionSnapshot,
@@ -457,6 +458,15 @@ export const api = {
   removeFavorite(cwd: string) {
     return jsonFetch<{ removed: boolean }>(
       `/api/favorites?cwd=${encodeURIComponent(cwd)}`,
+      { method: 'DELETE' },
+    );
+  },
+  listRecents() {
+    return jsonFetch<{ recents: RecentEntry[] }>('/api/recents');
+  },
+  removeRecent(cwd: string) {
+    return jsonFetch<{ removed: boolean }>(
+      `/api/recents?cwd=${encodeURIComponent(cwd)}`,
       { method: 'DELETE' },
     );
   },

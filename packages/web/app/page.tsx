@@ -8,17 +8,19 @@ import { FolderPicker } from '@/components/folder-picker';
 import {
   NewProjectWizard,
   buildBootstrapBrief,
+  buildDiscoveryBrief,
   type WizardSubmission,
 } from '@/components/new-project-wizard';
 import { SelfClaudeLogo } from '@/components/selfclaude-logo';
-import { PinnedList, SessionsList } from '@/components/sessions-list';
+import { PinnedList, RecentList, SessionsList } from '@/components/sessions-list';
 import { api } from '@/lib/api';
 import { filterClosing, useClosingTick } from '@/lib/closing-sessions';
-import type { Favorite, SessionMeta } from '@/lib/types';
+import type { Favorite, RecentEntry, SessionMeta } from '@/lib/types';
 
 export default function Home() {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
+  const [recents, setRecents] = useState<RecentEntry[]>([]);
   const [picking, setPicking] = useState(false);
   // Wizard runs after a folder pick — operator either fills the brief
   // (sup gets structured kickoff) or skips (sup runs cold Discovery).
@@ -56,13 +58,15 @@ export default function Home() {
 
   const refresh = useCallback(async () => {
     try {
-      const [s, f, h] = await Promise.all([
+      const [s, f, r, h] = await Promise.all([
         api.listSessions(),
         api.listFavorites(),
+        api.listRecents(),
         api.health().catch(() => null),
       ]);
       setSessions(s.sessions);
       setFavorites(f.favorites);
+      setRecents(r.recents);
       if (h) setHealth(h);
       setError(null);
     } catch (e) {
@@ -129,6 +133,17 @@ export default function Home() {
     router.push(`/sessions/${meta.id}`);
   };
 
+  const handleWizardDiscover = async () => {
+    if (!wizardCwd) return;
+    // Same shape as the wizard launch path, but the first message is
+    // a DISCOVERY_BRIEF instead of a BOOTSTRAP_BRIEF — sup's prompt
+    // routes on the prefix and explores the codebase autonomously.
+    const meta = await api.createSession(wizardCwd);
+    await api.sendMessage(meta.id, buildDiscoveryBrief(wizardCwd));
+    setWizardCwd(null);
+    router.push(`/sessions/${meta.id}`);
+  };
+
   const togglePin = async (cwd: string, label: string) => {
     const isPinned = favorites.some((f) => f.cwd === cwd);
     try {
@@ -152,10 +167,20 @@ export default function Home() {
     }
   };
 
+  const forgetRecent = async (cwd: string) => {
+    try {
+      await api.removeRecent(cwd);
+      void refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   const pinnedCwds = new Set(favorites.map((f) => f.cwd));
   const activeCwds = new Set(visibleSessions.map((s) => s.cwd));
 
-  const isEmpty = visibleSessions.length === 0 && favorites.length === 0;
+  const isEmpty =
+    visibleSessions.length === 0 && favorites.length === 0 && recents.length === 0;
 
   return (
     <>
@@ -231,16 +256,23 @@ export default function Home() {
             <LandingSkeleton />
           ) : (
             <>
+              <SessionsList
+                sessions={visibleSessions}
+                pinnedCwds={pinnedCwds}
+                onTogglePin={togglePin}
+              />
               <PinnedList
                 favorites={favorites}
                 activeCwds={activeCwds}
                 onOpen={openCwd}
                 onUnpin={unpin}
               />
-              <SessionsList
-                sessions={visibleSessions}
+              <RecentList
+                recents={recents}
+                activeCwds={activeCwds}
                 pinnedCwds={pinnedCwds}
-                onTogglePin={togglePin}
+                onOpen={openCwd}
+                onForget={forgetRecent}
               />
               {isEmpty && (
                 <EmptyState onPick={() => setPicking(true)} />
@@ -257,6 +289,7 @@ export default function Home() {
             cwd={wizardCwd}
             onLaunch={handleWizardLaunch}
             onSkip={handleWizardSkip}
+            onDiscoverExisting={handleWizardDiscover}
             onCancel={() => setWizardCwd(null)}
           />
         )}
