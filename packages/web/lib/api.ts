@@ -162,12 +162,17 @@ export const API_BASE =
   'http://127.0.0.1:7423';
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
+  // Only set Content-Type when there's actually a body. Fastify rejects
+  // bodyless requests that claim `application/json` because parsing the
+  // empty string as JSON throws — manifests as a 400 with no handler
+  // ever running. DELETE in particular hit this since it sends no body.
+  const headers: Record<string, string> = { ...(init?.headers as Record<string, string> ?? {}) };
+  if (init?.body !== undefined && headers['content-type'] === undefined) {
+    headers['content-type'] = 'application/json';
+  }
   const res = await fetch(`${API_BASE}${url}`, {
     ...init,
-    headers: {
-      'content-type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
   if (!res.ok) {
     let message = res.statusText;

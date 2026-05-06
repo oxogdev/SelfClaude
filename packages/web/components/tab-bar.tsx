@@ -70,8 +70,8 @@ export function TabBar() {
     } catch (e) {
       console.warn('[tab-bar] destroySession failed:', (e as Error).message);
     } finally {
-      // setTimeout outlives the originating component — that's
-      // intentional, we WANT the tombstone to lift across navigations.
+      // setTimeout outlives the originating component — the tombstone
+      // must lift across navigations, not bound to any one mount.
       setTimeout(() => clearClosing(id), TOMBSTONE_MS);
     }
   };
