@@ -2,6 +2,7 @@
 import { resolve } from 'node:path';
 import { Command } from 'commander';
 import { daemonLogs, daemonStart, daemonStatus, daemonStop } from './daemon.js';
+import { ensurePreflight } from './preflight.js';
 
 const program = new Command();
 
@@ -35,6 +36,10 @@ program
         await startDemo();
         return;
       }
+
+      // Real-runtime paths require the Claude Code CLI. Demo mode skips
+      // this check on purpose (it's pure synthetic events, no spawn).
+      ensurePreflight();
 
       // Web mode is the default. Daemon unless explicitly --foreground.
       if (!opts.tui) {
@@ -228,6 +233,7 @@ program
   .command('restart')
   .description('Restart the SelfClaude daemon')
   .action(async () => {
+    ensurePreflight();
     await daemonStop();
     await daemonStart();
   });
