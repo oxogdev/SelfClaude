@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Code, Plus, Shield } from 'lucide-react';
+import { Code, Layers, Plus, Send, Shield, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { computeDevStatus } from './agent-status';
 import { AgentTimeline } from './agent-timeline';
@@ -9,13 +9,26 @@ import type { ChatLogEntry, SessionMeta } from '@/lib/types';
 import type { DerivedState } from '@/lib/api';
 
 /**
- * Multi-agent dev pane. Renders a horizontal tab strip across every
- * currently-summoned specialist (always at minimum `developer`) and below
- * it the active tab's timeline. Capabilities — scroll, sticky-bottom,
- * lazy load, tool cards, thinking, scroll-to-bottom button, per-tab input
- * bar, wakeup overlay — are identical across agents (delegated to a
- * single `AgentTimeline` component); only the accent colour and label
- * differ. The supervisor is never represented here; it has its own pane.
+ * Known specialist roles — always present in the tab strip even when
+ * none are currently summoned, so the operator can propose dispatching
+ * an inactive agent without needing sup to summon it first. The
+ * `developer` slot stays first because it's the default `<TASK_FOR_DEVELOPER>`
+ * target. Order matches the registry `BUILTIN_AGENTS` semantics.
+ */
+const KNOWN_SPECIALISTS = ['developer', 'ui-dev', 'security'] as const;
+
+/**
+ * Multi-agent dev pane. Renders a horizontal tab strip across all known
+ * specialists (active = bright, inactive = faded) and below it either
+ * the selected tab's timeline (for active agents) or a "propose to sup"
+ * mini-form (for inactive ones). Operator can ask sup to dispatch an
+ * inactive specialist by typing a request; sup reads it and decides —
+ * see the OPERATOR_AGENT_PROPOSAL handler in supervisor.md.
+ *
+ * Capabilities for active timelines — scroll, sticky-bottom, lazy load,
+ * tool cards, thinking, scroll-to-bottom, per-tab input — are delegated
+ * to `AgentTimeline`; only the accent colour and label differ here.
+ * The supervisor itself is never represented here; it has its own pane.
  */
 export function AgentPane({
   meta,
@@ -26,6 +39,7 @@ export function AgentPane({
   busy,
   onSubmitDev,
   onSubmitAgent,
+  onProposeAgent,
   onLoadMoreHistory,
   hasMoreHistory,
   loadingHistory,
@@ -40,17 +54,41 @@ export function AgentPane({
   busy: boolean;
   onSubmitDev: (text: string) => void;
   onSubmitAgent: (agent: string, text: string) => void;
+  /** Propose dispatching an inactive specialist — sup decides. */
+  onProposeAgent: (agent: string, text: string) => Promise<void> | void;
   onLoadMoreHistory: () => void;
   hasMoreHistory: boolean;
   loadingHistory: boolean;
   wakeups: DerivedState['wakeups'] | null;
   derived: DerivedState | null;
 }) {
-  const activeAgents = useMemo(() => {
-    const all = derived?.activeAgents ?? ['developer'];
-    const others = all.filter((a) => a !== 'developer');
-    return ['developer', ...others];
+  // Active = currently-summoned by sup. We track this separately from
+  // KNOWN_SPECIALISTS so the tab strip can render inactive agents in a
+  // muted "propose" state.
+  const summonedSet = useMemo(() => {
+    const set = new Set(derived?.activeAgents ?? ['developer']);
+    set.add('developer'); // Developer always counts as active even when idle.
+    return set;
   }, [derived?.activeAgents]);
+
+  const allAgents = useMemo(() => {
+    // Anchor with KNOWN_SPECIALISTS, then append any project-custom
+    // agents that show up in the runtime list (future-proof against
+    // user-defined specialists in `<cwd>/.selfclaude/agents.json`).
+    const base = [...KNOWN_SPECIALISTS] as string[];
+    for (const a of derived?.activeAgents ?? []) {
+      if (!base.includes(a)) base.push(a);
+    }
+    return base;
+  }, [derived?.activeAgents]);
+
+  // Kept for downstream timeline lookups that expect the legacy shape
+  // (developer first, then others). Drives status indicators only —
+  // tab visibility now comes from `allAgents`.
+  const activeAgents = useMemo(
+    () => ['developer', ...allAgents.filter((a) => a !== 'developer' && summonedSet.has(a))],
+    [allAgents, summonedSet],
+  );
 
   // Last activity ts per agent — used both for the green-pulse indicator
   // on the tab AND for the smart-default landing tab.
@@ -100,8 +138,14 @@ export function AgentPane({
   }, []);
 
   const [activeTab, setActiveTab] = useState<string | null>(null);
+  // The selected tab can be any known agent (including inactive ones —
+  // operator may have clicked an inactive tab to propose dispatching it).
+  // Only fall back to the default when the current selection is gone
+  // entirely (e.g. operator never clicked anywhere yet, or a custom
+  // agent disappeared from the list).
   const effectiveTab =
-    activeTab && activeAgents.includes(activeTab) ? activeTab : defaultActiveTab;
+    activeTab && allAgents.includes(activeTab) ? activeTab : defaultActiveTab;
+  const effectiveTabIsActive = summonedSet.has(effectiveTab);
 
   /**
    * Auto-jump to a newly-summoned specialist. When `activeAgents` grows
@@ -144,39 +188,45 @@ export function AgentPane({
 
   return (
     <div className="h-full flex flex-col min-w-0">
-      {activeAgents.length > 1 && (
-        <div className="flex items-stretch border-b border-border bg-bg-subtle h-7 shrink-0">
-          {activeAgents.map((agent) => (
-            <AgentTab
-              key={agent}
-              agent={agent}
-              active={agent === effectiveTab}
-              lastTs={lastAgentTs.get(agent) ?? 0}
-              onClick={() => setActiveTab(agent)}
-            />
-          ))}
-        </div>
-      )}
+      <div className="flex items-stretch border-b border-border bg-bg-subtle h-7 shrink-0">
+        {allAgents.map((agent) => (
+          <AgentTab
+            key={agent}
+            agent={agent}
+            active={agent === effectiveTab}
+            summoned={summonedSet.has(agent)}
+            lastTs={lastAgentTs.get(agent) ?? 0}
+            onClick={() => setActiveTab(agent)}
+          />
+        ))}
+      </div>
       <div className="flex-1 min-h-0">
-        <AgentTimeline
-          // The key forces a remount on tab change so the timeline's
-          // sticky-bottom + scroll position resets cleanly per agent —
-          // otherwise switching between two long timelines would carry
-          // the previous tab's scroll offset over.
-          key={effectiveTab}
-          agent={effectiveTab}
-          chatLog={chatLog}
-          selectedToolUseId={selectedToolUseId}
-          streamingTs={effectiveTab === 'developer' ? streamingDevTs : null}
-          onSelectTool={onSelectTool}
-          busy={busy}
-          onSubmit={handleSubmit}
-          onLoadMoreHistory={onLoadMoreHistory}
-          hasMoreHistory={hasMoreHistory}
-          loadingHistory={loadingHistory}
-          wakeups={wakeups}
-          status={devStatus}
-        />
+        {effectiveTabIsActive ? (
+          <AgentTimeline
+            // The key forces a remount on tab change so the timeline's
+            // sticky-bottom + scroll position resets cleanly per agent —
+            // otherwise switching between two long timelines would carry
+            // the previous tab's scroll offset over.
+            key={effectiveTab}
+            agent={effectiveTab}
+            chatLog={chatLog}
+            selectedToolUseId={selectedToolUseId}
+            streamingTs={effectiveTab === 'developer' ? streamingDevTs : null}
+            onSelectTool={onSelectTool}
+            busy={busy}
+            onSubmit={handleSubmit}
+            onLoadMoreHistory={onLoadMoreHistory}
+            hasMoreHistory={hasMoreHistory}
+            loadingHistory={loadingHistory}
+            wakeups={wakeups}
+            status={devStatus}
+          />
+        ) : (
+          <ProposeAgentPanel
+            agent={effectiveTab}
+            onPropose={(text) => onProposeAgent(effectiveTab, text)}
+          />
+        )}
       </div>
     </div>
   );
@@ -184,8 +234,20 @@ export function AgentPane({
 
 const AGENT_ICON: Record<string, React.ElementType> = {
   developer: Code,
-  'ui-dev': Code,
+  'ui-dev': Layers,
   security: Shield,
+};
+
+const AGENT_LABEL: Record<string, string> = {
+  developer: 'developer',
+  'ui-dev': 'ui-dev',
+  security: 'security',
+};
+
+const AGENT_DESCRIPTION: Record<string, string> = {
+  developer: 'Backend / general-purpose implementation. Writes code, runs tests, edits configs.',
+  'ui-dev': 'Frontend specialist (admin-panel oriented). shadcn/ui + Tailwind, strict standards.',
+  security: 'Read-only auditor. Inspects diffs/configs for secrets, injection, auth bypass, deps.',
 };
 
 const AGENT_TAB_ACCENT: Record<string, { active: string; idle: string; dot: string }> = {
@@ -209,11 +271,14 @@ const AGENT_TAB_ACCENT: Record<string, { active: string; idle: string; dot: stri
 function AgentTab({
   agent,
   active,
+  summoned,
   lastTs,
   onClick,
 }: {
   agent: string;
   active: boolean;
+  /** Currently-summoned by sup. Inactive agents render dimmed + with a propose icon. */
+  summoned: boolean;
   lastTs: number;
   onClick: () => void;
 }) {
@@ -227,6 +292,27 @@ function AgentTab({
   const ageMs = lastTs > 0 ? Date.now() - lastTs : Number.POSITIVE_INFINITY;
   const live = ageMs < 3_000;
   const recent = !live && ageMs < 30_000;
+
+  // Inactive (not summoned by sup yet) — render in a muted style with
+  // a small "+" affordance to signal "click to propose dispatching."
+  if (!summoned) {
+    return (
+      <button
+        onClick={onClick}
+        className={cn(
+          'flex items-center gap-1.5 px-3 border-b-2 text-[11px] font-mono uppercase tracking-wide transition-colors',
+          active
+            ? 'border-zinc-500 text-zinc-300 bg-bg-elevated/40'
+            : 'border-transparent text-zinc-600 hover:text-zinc-300 hover:bg-bg-elevated/30',
+        )}
+        title={`${agent} — not active. Click to propose dispatching to sup.`}
+      >
+        <Icon size={11} className="opacity-60" />
+        <span className="opacity-80">{agent}</span>
+        <Plus size={10} className="opacity-50" />
+      </button>
+    );
+  }
 
   return (
     <button
@@ -259,6 +345,119 @@ function AgentTab({
         />
       )}
     </button>
+  );
+}
+
+/**
+ * Centred mini-form shown in place of an agent timeline when the
+ * operator clicks an inactive agent tab. Submits a "please consider
+ * dispatching X for this work" message to sup, who decides whether
+ * to actually `<TASK_FOR_DEVELOPER agent="X">` or push back.
+ *
+ * The message gets routed through the regular sendMessage pipeline
+ * (sup's chat shows the operator's intent), so the audit trail is the
+ * normal user-message → sup-turn flow — no new chat-log entry types.
+ */
+function ProposeAgentPanel({
+  agent,
+  onPropose,
+}: {
+  agent: string;
+  onPropose: (text: string) => Promise<void> | void;
+}) {
+  const [text, setText] = useState('');
+  const [pending, setPending] = useState(false);
+  const Icon = AGENT_ICON[agent] ?? Sparkles;
+  const accent = AGENT_TAB_ACCENT[agent] ?? AGENT_TAB_ACCENT.developer!;
+  const description =
+    AGENT_DESCRIPTION[agent] ?? 'Custom specialist. Sup will brief based on your request.';
+  const label = AGENT_LABEL[agent] ?? agent;
+
+  const handleSubmit = async () => {
+    const trimmed = text.trim();
+    if (trimmed.length === 0 || pending) return;
+    setPending(true);
+    try {
+      await onPropose(trimmed);
+      setText('');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col items-center justify-center px-6 py-8 overflow-y-auto scrollbar-thin">
+      <div className="w-full max-w-md">
+        <div className="flex items-start gap-3 mb-4">
+          <span
+            className={cn(
+              'shrink-0 w-9 h-9 rounded-md border flex items-center justify-center',
+              accent.active,
+            )}
+          >
+            <Icon size={16} />
+          </span>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-[13px] font-mono font-semibold text-zinc-100">
+              {label} <span className="text-[10px] uppercase tracking-widest text-zinc-500 ml-1">not active</span>
+            </h3>
+            <p className="text-[11px] text-zinc-400 leading-relaxed mt-0.5">{description}</p>
+          </div>
+        </div>
+        <div className="rounded-md border border-border bg-bg-panel/50 p-3 mb-3">
+          <p className="text-[11px] text-zinc-300 leading-relaxed">
+            Tell <span className="text-cyan-300 font-medium">sup</span> what you'd like
+            <span className="text-zinc-100 font-medium"> {label}</span> to do.
+          </p>
+          <p className="text-[10px] text-zinc-500 leading-relaxed mt-1.5">
+            Sup will read your request, decide whether dispatching {label} is the right
+            move (or push back if a different specialist fits better), and brief them
+            with the context they need. You'll see sup's response in the supervisor
+            chat on the left.
+          </p>
+        </div>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              void handleSubmit();
+            }
+          }}
+          placeholder={`e.g. "Please have ${label} review the login form for accessibility issues."`}
+          rows={5}
+          disabled={pending}
+          autoFocus
+          className="w-full bg-bg-subtle border border-border rounded-md px-3 py-2 text-[12px] font-mono text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-cyan-600 resize-none leading-relaxed disabled:opacity-50"
+        />
+        <div className="mt-2 flex items-center gap-2">
+          <span className="text-[10px] font-mono text-zinc-600">
+            ⌘+Enter to send
+          </span>
+          <span className="flex-1" />
+          <button
+            type="button"
+            onClick={() => void handleSubmit()}
+            disabled={text.trim().length === 0 || pending}
+            className={cn(
+              'text-[11px] font-mono font-medium px-3 py-1.5 rounded inline-flex items-center gap-1.5 border',
+              text.trim().length > 0 && !pending
+                ? 'border-cyan-600 bg-cyan-700 text-white hover:bg-cyan-600'
+                : 'border-zinc-700 bg-zinc-900/40 text-zinc-600 cursor-not-allowed',
+            )}
+          >
+            {pending ? (
+              <>sending…</>
+            ) : (
+              <>
+                <Send size={11} /> Propose to sup
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

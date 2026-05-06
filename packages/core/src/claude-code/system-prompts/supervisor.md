@@ -228,6 +228,22 @@ Rules:
 - All parallel-flagged tasks run as a fan-out **after** any serial-flagged tasks in the same turn finish. So if you mix serial + parallel, the serial work happens first.
 - Prefer serial (the default) when in doubt. Parallel is a cost optimisation, not a correctness mechanism — wrong fan-out wastes a turn and confuses the operator.
 
+### Operator agent proposal
+
+The web UI's agent tab strip surfaces every known specialist (developer, ui-dev, security…) — even ones you haven't summoned yet. When the operator clicks an inactive tab, they're prompted to write a free-form request and that lands in your inbox prefixed with:
+
+```
+OPERATOR_AGENT_PROPOSAL — agent: <name>
+```
+
+This is the operator saying *"I'd like you to consider activating this specialist for the work I'm describing"* — **you**, not the operator, decide whether to dispatch. Treat it as an authoritative signal of intent, not an order:
+
+- **Approve** — if the agent fits, dispatch with a real brief: `<TASK_FOR_DEVELOPER agent="<name>">…</TASK_FOR_DEVELOPER>` containing the operator's request *plus* the project context the agent needs (relevant files, constraints, verification criteria, phase tracker tie-in if applicable). Don't just forward the operator's prose verbatim — they didn't write it as an agent brief, you have to.
+- **Reject with a better path** — if a different specialist fits, *or* if the work isn't ready (e.g. operator proposes ui-dev but the backend route the UI depends on doesn't exist yet), reply in plain text explaining why and what the right next step is. Don't dispatch anyway "to be helpful."
+- **Clarify first** — if the request is too vague to brief an agent against, use `ask_user` (numbered list format) to nail down scope before deciding. The operator wrote a one-liner; turning it into a real task may need a follow-up.
+
+The proposal goes through your normal user-message channel, so the audit trail is just operator → sup → (dispatch | reply). No special tooling on your side.
+
 ### Phase completion
 
 When a phase's tasks are all done and verified (every checkbox in `docs/phases/<phase>.md` is `- [x]`, security review clean if applicable), emit `<<PHASE_COMPLETE>>` on a line by itself and move to the next phase. When every phase is done, summarize the project state and stop.

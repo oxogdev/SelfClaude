@@ -202,6 +202,30 @@ export default function SessionPage() {
     }
   };
 
+  /**
+   * Operator-initiated proposal to dispatch an inactive specialist.
+   * The agent tab strip surfaces unsummoned agents in a faded state;
+   * clicking one drops the operator into a "tell sup what you want"
+   * mini-form instead of a timeline. We wrap the request in a clear
+   * preamble so sup recognises this is a structured proposal (handled
+   * in supervisor.md → "Operator agent proposal") and routes through
+   * the normal sendMessage path so the audit trail is just user → sup.
+   */
+  const handleProposeAgent = async (agent: string, text: string) => {
+    const wrapped =
+      `OPERATOR_AGENT_PROPOSAL — agent: ${agent}\n\n` +
+      `The operator clicked the ${agent} tab and submitted this request. Decide whether ` +
+      `dispatching ${agent} is the right move; if yes, dispatch with a complete brief via ` +
+      `<TASK_FOR_DEVELOPER agent="${agent}">…</TASK_FOR_DEVELOPER>. If no, explain to ` +
+      `the operator why and suggest the better path.\n\n` +
+      `Operator's request:\n${text}`;
+    try {
+      await api.sendMessage(id, wrapped);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   // Right-rail state lifted to the page so the rail can render outside
   // the PanelGroup (always visible) while the wide content pane is just
   // a Panel inside — collapsing the wide pane returns the freed space
@@ -320,6 +344,7 @@ export default function SessionPage() {
               busy={session.busy}
               onSubmitDev={handleDevSubmit}
               onSubmitAgent={handleAgentSubmit}
+              onProposeAgent={handleProposeAgent}
               onLoadMoreHistory={loadMoreHistory}
               hasMoreHistory={session.hasMoreHistory}
               loadingHistory={session.loadingHistory}
