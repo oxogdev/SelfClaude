@@ -1,0 +1,48 @@
+name: CI
+
+# Runs on every push to main and on pull requests against main. We
+# check both directions: typecheck (catches type-level regressions
+# even when no test exercises the code path) and unit tests (the
+# faster suite). The `test:integration` suite spawns real claude
+# subprocesses and would burn API credits + need a key in CI, so we
+# don't run it here — it's expected to be run locally before tagging.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    name: typecheck + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        # The package.json's `packageManager` field is the source of
+        # truth for the version (pnpm 10.x); action-setup picks it up.
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (core)
+        # `core` is the largest surface; isolate it so failures here
+        # don't get masked by web or cli typecheck noise. CLI typecheck
+        # currently pulls a TUI-side type that's pre-existing legacy
+        # and unrelated to ongoing work, so we skip it for now.
+        run: pnpm --filter @selfclaude/core typecheck
+
+      - name: Typecheck (web)
+        run: pnpm --filter @selfclaude/web typecheck
+
+      - name: Unit tests (core)
+        run: pnpm --filter @selfclaude/core test

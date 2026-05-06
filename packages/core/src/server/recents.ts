@@ -14,8 +14,18 @@ import { z } from 'zod';
  * Storage shape matches favorites.json so the format stays familiar.
  */
 
-const RECENTS_PATH = join(homedir(), '.selfclaude', 'recents.json');
+const DEFAULT_RECENTS_PATH = join(homedir(), '.selfclaude', 'recents.json');
 const RECENTS_MAX = 20;
+
+/**
+ * The active path is normally the default but tests override it via
+ * `SELFCLAUDE_RECENTS_PATH` so they can exercise the file-roundtrip
+ * logic against a temp file without polluting the operator's real
+ * recents log. Production never sets this.
+ */
+function recentsPath(): string {
+  return process.env.SELFCLAUDE_RECENTS_PATH || DEFAULT_RECENTS_PATH;
+}
 
 export const RecentEntrySchema = z.object({
   cwd: z.string(),
@@ -30,9 +40,10 @@ const RecentsFileSchema = z.object({
 export type RecentEntry = z.infer<typeof RecentEntrySchema>;
 
 function loadFile(): { recents: RecentEntry[] } {
-  if (!existsSync(RECENTS_PATH)) return { recents: [] };
+  const path = recentsPath();
+  if (!existsSync(path)) return { recents: [] };
   try {
-    const raw = readFileSync(RECENTS_PATH, 'utf8');
+    const raw = readFileSync(path, 'utf8');
     const parsed: unknown = JSON.parse(raw);
     const result = RecentsFileSchema.safeParse(parsed);
     if (result.success) return result.data;
@@ -43,8 +54,9 @@ function loadFile(): { recents: RecentEntry[] } {
 }
 
 function persistFile(data: { recents: RecentEntry[] }): void {
-  mkdirSync(dirname(RECENTS_PATH), { recursive: true });
-  writeFileSync(RECENTS_PATH, `${JSON.stringify(data, null, 2)}\n`);
+  const path = recentsPath();
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`);
 }
 
 /**
