@@ -172,7 +172,13 @@ export async function runDualAgentTurn(opts: LoopRunOptions): Promise<LoopTurnRe
       // to the operator via `request_user_approval` MCP.
       permissionMode: 'acceptEdits',
       envOverrides: orch.hookEnv('supervisor', 'supervisor'),
-      enableChrome: false,
+      // Chrome integration is on for the supervisor specifically — sup
+      // is the conversational agent the operator talks to, so it
+      // benefits most from being able to peek at running pages, inspect
+      // a deploy, or fetch up-to-date docs from a URL. Specialists stay
+      // off because they often run in parallel and would race the
+      // single Chrome session attached to the operator's browser.
+      enableChrome: true,
       signal: opts.signal,
     },
     opts.onSupervisorEvent,
