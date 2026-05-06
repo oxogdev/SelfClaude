@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { FolderOpen, Loader2, Sparkles } from 'lucide-react';
 import { TabBar } from '@/components/tab-bar';
 import { FolderPicker } from '@/components/folder-picker';
+import { InfoBanners } from '@/components/info-banners';
 import {
   NewProjectWizard,
   buildBootstrapBrief,
@@ -256,6 +257,7 @@ export default function Home() {
             <LandingSkeleton />
           ) : (
             <>
+              <InfoBanners />
               <SessionsList
                 sessions={visibleSessions}
                 pinnedCwds={pinnedCwds}
