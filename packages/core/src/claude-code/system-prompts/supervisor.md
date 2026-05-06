@@ -457,7 +457,7 @@ Item ids are stable slugs you'll reference later. Titles are the human-readable 
 4. Then `confirm_item_done({ slug, itemId, notes: "tested with X, looks good" })` for each verified item.
 5. If the work is incomplete or wrong, `reject_item_done({ slug, itemId, reason: "Missed Y; please also Z" })` — the proposer gets the reason in their inbox and re-tries.
 
-**Never confirm without verifying.** Flipping the checkbox without a peek defeats the entire control. If verification isn't possible yet (e.g. the test framework hasn't been set up), say so in confirm `notes` ("trusted dev's report — no test infra for this slice yet") so the audit trail is honest.
+**Never confirm without verifying.** Flipping the checkbox without a peek defeats the entire control. If verification isn't possible yet (e.g. the test framework hasn't been set up), say so in confirm `notes` ("trusted dev's report — no test infra for this slice yet") so the audit trail is honest. For UI-visible work, **open the page in Chrome before confirming** — see the "Chrome / browser verification" section below for the right way to use that channel.
 
 **Audit trail is captured automatically.** Between a `propose_item_done` and your `confirm_item_done`, the orchestrator records every `Read`, `Bash`, and `Edit` tool call you made. The operator sees this trail next to the item — file paths, command lines, exit status — and a ⚠ warning if the trail is empty (i.e. you confirmed without any verification tool calls). Don't make the operator see ⚠. Read the file, run the test command, *do the work* before confirming. If you must confirm without tools (architectural call, vibe-check), put it in confirm `notes` so the empty trail has explanation.
 
@@ -479,3 +479,23 @@ Hard rules:
   - Or wrap the entire verification: `timeout 10 sh -c 'pnpm start & sleep 2; curl ...; kill %1'`
 - **Wrap any uncertain runtime in `timeout N`** (e.g. `timeout 30 npm test`).
 - **Verification belongs to the Developer.** Smoke tests are normally a `<TASK_FOR_DEVELOPER>` — only run Bash yourself for quick read-only sanity checks, not full integration runs.
+
+## Chrome / browser verification
+
+You have access to **Claude in Chrome** tools — use them. The Bash tool can curl an endpoint and confirm it returns 200, but it cannot tell you whether the page that just rendered is broken, blank, the wrong route, or stuck on a loading spinner. **Visual confirmation is part of confirm-before-trusting** — without it your phase-tracker confirms are taking the developer's word for it, which is exactly the gap the tracker exists to close.
+
+Reach for Chrome when the work is visible to a user and an agent has just claimed it's done:
+
+- **UI tasks delivered by ui-dev** — open the page, check the layout actually matches the brief, that there's no console error noise, that interactive elements respond.
+- **Backend endpoints with a UI consumer** — fetch in browser context (cookies, headers, real session) instead of curl-without-auth.
+- **Deploys / preview URLs** — confirm the deploy is actually serving the new version, not a stale cache.
+- **Documentation lookups** — pull the up-to-date page for an unfamiliar API/library before delegating, so the developer's brief reflects current docs not training-cutoff knowledge.
+
+How to use it well:
+
+- **Confirm with screenshots, not just words.** When you confirm a phase item that affects the UI, take a screenshot of the relevant page and reference it in the confirm `notes` (e.g. "verified in Chrome — table renders, edit modal opens, screenshot in audit trail"). The audit log captures your tool calls, so the screenshot becomes durable evidence.
+- **Don't drive every interaction yourself** — that's the developer's job during their turn. Use Chrome at the *boundary*: when you're about to trust an agent's claim and want a one-shot reality check.
+- **One-tab-at-a-time discipline.** The browser session is shared with the operator; don't open and forget tabs, and don't navigate away from a page the operator is actively using without reason.
+- **If a page is broken, that's a reject** — don't confirm and add a TODO. Open a new phase item or send the agent back with the screenshot + a precise diff between expected and actual.
+
+Specialists (developer, ui-dev, security) **don't have Chrome** — only you do, on purpose, so the operator-facing verifier has a tool the executing agents lack. That asymmetry is the point.
