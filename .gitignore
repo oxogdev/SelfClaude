@@ -8,5 +8,7 @@ dist/
 .selfclaude/
 coverage/
 .tsbuildinfo
+*.tsbuildinfo
+tsconfig.tsbuildinfo
 .next/
 .turbo/
