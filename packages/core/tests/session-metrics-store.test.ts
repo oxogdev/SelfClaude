@@ -344,6 +344,52 @@ test('readSessionMetrics returns events in append order', async () => {
   });
 });
 
+test('computeSessionRollup: aggregates tokens-estimated events into inboxCompression', async () => {
+  await withFreshStore(async (cwd) => {
+    await appendSessionMetricsEvent(cwd, { kind: 'session-start', sessionId: 's', ts: 0 });
+    await appendSessionMetricsEvent(cwd, {
+      kind: 'tokens-estimated',
+      sessionId: 's',
+      role: 'supervisor',
+      messageCount: 1,
+      originalTokens: 1000,
+      compressedTokens: 400,
+      preservedMarkers: ['verdict'],
+      ts: 1,
+    });
+    await appendSessionMetricsEvent(cwd, {
+      kind: 'tokens-estimated',
+      sessionId: 's',
+      role: 'supervisor',
+      messageCount: 2,
+      originalTokens: 600,
+      compressedTokens: 600, // bypassed (under threshold) — still recorded
+      preservedMarkers: [],
+      ts: 2,
+    });
+    const events = await readSessionMetrics(cwd);
+    const r = computeSessionRollup(events, 's', 100);
+    assert.equal(r.inboxCompression.drainEvents, 2);
+    assert.equal(r.inboxCompression.estimatedOriginalTokens, 1600);
+    assert.equal(r.inboxCompression.estimatedCompressedTokens, 1000);
+    assert.equal(r.inboxCompression.estimatedTokensSaved, 600);
+    // 1000 / 1600 = 0.625
+    assert.ok(Math.abs(r.inboxCompression.compressionRatio - 0.625) < 1e-9);
+  });
+});
+
+test('computeSessionRollup: inboxCompression zeroed when no drain events seen', async () => {
+  await withFreshStore(async (cwd) => {
+    await appendSessionMetricsEvent(cwd, { kind: 'session-start', sessionId: 's', ts: 0 });
+    const events = await readSessionMetrics(cwd);
+    const r = computeSessionRollup(events, 's', 100);
+    assert.equal(r.inboxCompression.drainEvents, 0);
+    assert.equal(r.inboxCompression.estimatedOriginalTokens, 0);
+    assert.equal(r.inboxCompression.estimatedCompressedTokens, 0);
+    assert.equal(r.inboxCompression.compressionRatio, 0);
+  });
+});
+
 test('verify file lives at the env-overridden path', async () => {
   // Sanity check the test harness: SELFCLAUDE_SESSION_METRICS_PATH
   // routes the store to a temp path. If it didn't, we'd be writing to

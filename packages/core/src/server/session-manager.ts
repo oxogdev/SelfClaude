@@ -1489,6 +1489,33 @@ export class SessionManager extends EventEmitter {
         ts: e.ts,
       });
     });
+    // Phase 4 telemetry — every supervisor inbox drain reports its
+    // before/after token count plus the marker labels it preserved
+    // through compression. Aggregated into the inboxCompression rollup
+    // so operators (and future regression tests) can see how much
+    // narrative is being trimmed without losing decisions.
+    orch.on(
+      'inbox-compressed',
+      (e: {
+        role: string;
+        messageCount: number;
+        originalTokens: number;
+        compressedTokens: number;
+        preservedMarkers: string[];
+        ts: number;
+      }) => {
+        void this.recordMetric(ctx, {
+          kind: 'tokens-estimated',
+          sessionId: ctx.id,
+          role: e.role,
+          messageCount: e.messageCount,
+          originalTokens: e.originalTokens,
+          compressedTokens: e.compressedTokens,
+          preservedMarkers: e.preservedMarkers,
+          ts: e.ts,
+        });
+      },
+    );
     orch.on(
       'phase-tracker-updated',
       (

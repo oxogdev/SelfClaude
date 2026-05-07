@@ -73,6 +73,30 @@ export const SessionMetricsEventSchema = z.discriminatedUnion('kind', [
     override: z.boolean(),
     ts: z.number(),
   }),
+  /**
+   * Phase 4 telemetry — one event per `onUserPromptSubmit` drain that
+   * feeds the inbox compressor. `originalTokens` is what would have
+   * been injected without compression; `compressedTokens` is what
+   * actually went into sup's user message. Both are estimates from
+   * the char-based heuristic (`packages/core/src/orchestrator/
+   * inbox-compressor.ts:estimateTokens`), not real billing tokens —
+   * informational only.
+   */
+  z.object({
+    kind: z.literal('tokens-estimated'),
+    sessionId: z.string(),
+    /** Recipient role of the inbox drain. Currently always `'supervisor'`. */
+    role: z.string(),
+    /** Number of inbox messages combined into this estimate. */
+    messageCount: z.number(),
+    /** Estimated tokens before compression. */
+    originalTokens: z.number(),
+    /** Estimated tokens after compression. */
+    compressedTokens: z.number(),
+    /** Marker labels preserved across compression (deduped). */
+    preservedMarkers: z.array(z.string()),
+    ts: z.number(),
+  }),
 ]);
 export type SessionMetricsEvent = z.infer<typeof SessionMetricsEventSchema>;
 
@@ -162,6 +186,19 @@ export interface SessionMetricsRollup {
     /** Distinct filenames that hit any attempt. */
     distinctFilenames: number;
   };
+  /** Phase 4 inbox-compressor aggregate (estimates only). */
+  inboxCompression: {
+    /** Number of drain events recorded for this session. */
+    drainEvents: number;
+    /** Estimated tokens that would have been injected without compression. */
+    estimatedOriginalTokens: number;
+    /** Estimated tokens actually injected after compression. */
+    estimatedCompressedTokens: number;
+    /** estimatedOriginalTokens − estimatedCompressedTokens. */
+    estimatedTokensSaved: number;
+    /** 0–1 ratio. 0 when no drains, otherwise compressed / original. */
+    compressionRatio: number;
+  };
 }
 
 export interface ProjectMetricsRollup {
@@ -213,6 +250,11 @@ export function computeSessionRollup(
   const phasePerFilename = new Map<string, FilenameAgg>();
   let overrides = 0;
 
+  // Phase 4 — inbox compression aggregate.
+  let drainEvents = 0;
+  let estimatedOriginalTokens = 0;
+  let estimatedCompressedTokens = 0;
+
   for (const e of filtered) {
     if (e.kind === 'turn') {
       turns[e.who] += 1;
@@ -235,6 +277,10 @@ export function computeSessionRollup(
       if (agg.firstAttemptValid === null) agg.firstAttemptValid = e.valid;
       if (e.valid || e.override) agg.everValid = true;
       if (e.override) overrides += 1;
+    } else if (e.kind === 'tokens-estimated') {
+      drainEvents += 1;
+      estimatedOriginalTokens += e.originalTokens;
+      estimatedCompressedTokens += e.compressedTokens;
     }
   }
 
@@ -268,6 +314,16 @@ export function computeSessionRollup(
       ultimateFilenames: ultimate,
       overrides,
       distinctFilenames,
+    },
+    inboxCompression: {
+      drainEvents,
+      estimatedOriginalTokens,
+      estimatedCompressedTokens,
+      estimatedTokensSaved: estimatedOriginalTokens - estimatedCompressedTokens,
+      compressionRatio:
+        estimatedOriginalTokens === 0
+          ? 0
+          : estimatedCompressedTokens / estimatedOriginalTokens,
     },
   };
 }

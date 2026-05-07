@@ -16,6 +16,7 @@ import {
   validatePhaseDoc,
   type PhaseContractAttemptEvent,
 } from './phase-contracts.js';
+import { compressInboxMessage, estimateTokens } from './inbox-compressor.js';
 import { startHookServer } from '../hooks/server.js';
 import { installWorkspace, type WorkspacePaths } from '../hooks/installer.js';
 import type { Role } from '../hooks/types.js';
@@ -474,9 +475,38 @@ export class Orchestrator extends EventEmitter {
         const drained = this.messages.drain(role);
         if (drained.length === 0) return '';
         log('info', 'hook.prompt.injected', { role, count: drained.length });
-        return drained
-          .map((m) => `[from ${m.source} @ ${new Date(m.ts).toISOString()}]\n${m.body}`)
-          .join('\n\n---\n\n');
+        // Phase 4 — compress only sup-bound bodies. Sup→dev messages
+        // are the synthetic continue prompt or a sup-to-dev directive
+        // (already terse). Sup's inbox is where DEVELOPER_REPORT bloats
+        // accumulate, so that's the worthwhile target.
+        const shouldCompress = role === 'supervisor';
+        const preservedMarkerSet = new Set<string>();
+        let totalOriginalTokens = 0;
+        let totalCompressedTokens = 0;
+        const rendered = drained.map((m) => {
+          const header = `[from ${m.source} @ ${new Date(m.ts).toISOString()}]\n`;
+          if (!shouldCompress) {
+            totalOriginalTokens += estimateTokens(m.body);
+            totalCompressedTokens += estimateTokens(m.body);
+            return `${header}${m.body}`;
+          }
+          const result = compressInboxMessage(m.body);
+          totalOriginalTokens += estimateTokens(m.body);
+          totalCompressedTokens += estimateTokens(result.body);
+          for (const label of result.preservedMarkers) preservedMarkerSet.add(label);
+          return `${header}${result.body}`;
+        });
+        if (shouldCompress) {
+          this.emit('inbox-compressed', {
+            role,
+            messageCount: drained.length,
+            originalTokens: totalOriginalTokens,
+            compressedTokens: totalCompressedTokens,
+            preservedMarkers: Array.from(preservedMarkerSet).sort(),
+            ts: Date.now(),
+          });
+        }
+        return rendered.join('\n\n---\n\n');
       },
       // Each MCP handler is wrapped to record telemetry on completion.
       // The recordTelemetry call is fire-and-forget — failures don't

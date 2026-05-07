@@ -546,6 +546,19 @@ export interface SessionMetricsRollup {
   filesTouched: number;
   filesTouchedByTool: Record<string, number>;
   phaseContract: PhaseContractMetrics;
+  /**
+   * Phase 4 inbox-compressor aggregate. All numbers are *estimates*
+   * from the char-based heuristic — they're informational, not
+   * billing values. `compressionRatio` is `compressed / original`
+   * (0–1), so 0.5 means the compressor halved the injected payload.
+   */
+  inboxCompression: {
+    drainEvents: number;
+    estimatedOriginalTokens: number;
+    estimatedCompressedTokens: number;
+    estimatedTokensSaved: number;
+    compressionRatio: number;
+  };
 }
 
 export interface ProjectMetricsRollup {
