@@ -223,6 +223,8 @@ export default function Home() {
                 <span>
                   {health.sessions} session{health.sessions === 1 ? '' : 's'}
                 </span>
+                <span className="text-zinc-700">·</span>
+                <BaselineRatioControl />
               </div>
             )}
           </div>
@@ -379,4 +381,58 @@ function formatUptime(seconds: number): string {
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
   if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h`;
   return `${Math.floor(seconds / 86_400)}d`;
+}
+
+/**
+ * Phase 2 telemetry — operator control for the "estimated time saved"
+ * baseline ratio shown on pinned project cards. Value persists in
+ * localStorage; setting "off" (1×) hides the estimate panel entirely.
+ *
+ * Per ROADMAP calibration #2: estimates are secondary, labelled, and
+ * configurable. The operator decides whether to trust the assumption,
+ * and the dropdown makes the assumption visible at all times.
+ */
+const BASELINE_KEY = 'selfclaude:baseline-ratio';
+const BASELINE_OPTIONS: { value: number; label: string }[] = [
+  { value: 1, label: 'off' },
+  { value: 2, label: '2×' },
+  { value: 3, label: '3×' },
+  { value: 5, label: '5×' },
+  { value: 10, label: '10×' },
+];
+
+function BaselineRatioControl() {
+  const [value, setValue] = useState<number>(3);
+  useEffect(() => {
+    const raw = window.localStorage.getItem(BASELINE_KEY);
+    const n = raw ? Number.parseFloat(raw) : NaN;
+    if (Number.isFinite(n) && n >= 1 && n <= 10) setValue(n);
+  }, []);
+  const onChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const next = Number.parseFloat(e.currentTarget.value);
+    setValue(next);
+    window.localStorage.setItem(BASELINE_KEY, String(next));
+    // Sibling cards listen for this so they re-render with the new
+    // baseline without needing a page reload.
+    window.dispatchEvent(new Event('selfclaude:baseline-changed'));
+  };
+  return (
+    <span
+      className="inline-flex items-center gap-1"
+      title="Multiplier used to estimate time saved on pinned project cards. The number is configurable and explicitly labelled — it's NOT a measured value, just a comparison against your chosen baseline."
+    >
+      <span>estimate</span>
+      <select
+        value={value}
+        onChange={onChange}
+        className="bg-transparent border border-zinc-700/50 hover:border-zinc-500 rounded px-1 py-0.5 text-[10px] font-mono uppercase tracking-widest text-zinc-400 focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+      >
+        {BASELINE_OPTIONS.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
 }

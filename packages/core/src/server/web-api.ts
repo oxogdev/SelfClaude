@@ -145,6 +145,45 @@ export function buildWebApi(manager: SessionManager): FastifyInstance {
   });
 
   /**
+   * Phase 2 telemetry — per-session rollup of activity metrics.
+   * Reads the `<cwd>/.selfclaude/session-metrics.jsonl` event log,
+   * filters to this session id, and returns a rollup with raw
+   * counters: turns, tool calls, files touched, duration, and the
+   * phase-contract first-pass / ultimate-pass aggregate. Per ROADMAP
+   * calibration #2: the API exposes RAW numbers; the UI is responsible
+   * for any "estimate" panel and must label estimates as such.
+   */
+  server.get('/api/sessions/:id/metrics', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const ctx = manager.getSession(id);
+    if (!ctx) return reply.code(404).send({ error: 'session not found' });
+    const { computeSessionRollup, readSessionMetrics } = await import(
+      '../project/session-metrics-store.js'
+    );
+    const events = await readSessionMetrics(ctx.cwd, id);
+    return computeSessionRollup(events, id);
+  });
+
+  /**
+   * Phase 2 telemetry — project-wide rollup across every session for a
+   * cwd. Used by the home-page project card to show cumulative
+   * activity ("you've worked X turns / touched Y files in this
+   * project total"). Path is keyed on `cwd` (query param) rather than
+   * a session id because the rollup spans sessions, including
+   * destroyed ones.
+   */
+  server.get('/api/projects/metrics', async (req, reply) => {
+    const Q = z.object({ cwd: z.string().min(1) });
+    const parsed = Q.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
+    const { computeProjectRollup, readSessionMetrics } = await import(
+      '../project/session-metrics-store.js'
+    );
+    const events = await readSessionMetrics(parsed.data.cwd);
+    return computeProjectRollup(events);
+  });
+
+  /**
    * Phase tracker — the structured progress source (`<cwd>/.selfclaude/phases.json`).
    * Supersedes the markdown-checkbox parser for sessions where the
    * supervisor has registered phase items via `register_phase_items`.

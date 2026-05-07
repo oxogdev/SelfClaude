@@ -26,6 +26,11 @@ import {
 } from '../project/chat-log.js';
 import { readMetrics, writeMetrics } from '../project/metrics-store.js';
 import {
+  appendSessionMetricsEvent,
+  type SessionMetricsEvent,
+} from '../project/session-metrics-store.js';
+import type { PhaseContractAttemptEvent } from '../orchestrator/phase-contracts.js';
+import {
   readPhases,
   type ConfirmEvidence,
   type PhasesFile,
@@ -426,6 +431,15 @@ export class SessionManager extends EventEmitter {
     await this.restoreActiveAgents(ctx);
     await this.restoreMetrics(ctx);
 
+    // Phase 2 telemetry — session boundary marker. Goes into the JSONL
+    // event log so cross-session rollups can compute per-session
+    // duration. Fire-and-forget; collector failures don't block boot.
+    void this.recordMetric(ctx, {
+      kind: 'session-start',
+      sessionId: id,
+      ts: Date.now(),
+    });
+
     // Record into the recents log so the landing page's "Recent" rail
     // can surface this cwd next time. Best-effort, non-fatal.
     try {
@@ -449,6 +463,14 @@ export class SessionManager extends EventEmitter {
     // anywhere below would leave the entry in the map, the frontend's
     // tombstone would eventually expire, and the tab would reappear.
     this.sessions.delete(id);
+    // Phase 2 telemetry — session boundary marker. Recorded BEFORE the
+    // async cleanup so a stop() that hangs doesn't lose the end ts.
+    void this.recordMetric(ctx, {
+      kind: 'session-end',
+      sessionId: id,
+      ts: Date.now(),
+      reason: 'destroy',
+    });
     this.wakeups.cancelAll(id, 'shutdown');
     // Abort any in-flight turn so we're not stuck waiting on a CC
     // subprocess that may not honor a soft signal quickly.
@@ -1452,6 +1474,21 @@ export class SessionManager extends EventEmitter {
       void this.appendLog(ctx, { type: 'phase-doc-written', filename: e.filename, ts });
       this.emitEvent(ctx, { kind: 'phase-doc-written', filename: e.filename, ts });
     });
+    // Phase 2 telemetry — every contract validation attempt feeds the
+    // first-pass / ultimate-pass rate rollup. Both valid AND invalid
+    // attempts are recorded so the rate math has a denominator.
+    orch.on('phase-contract-attempt', (e: PhaseContractAttemptEvent) => {
+      void this.recordMetric(ctx, {
+        kind: 'phase-contract-attempt',
+        sessionId: ctx.id,
+        filename: e.filename,
+        contractName: e.contractName,
+        attemptNumber: e.attemptNumber,
+        valid: e.valid,
+        override: e.override,
+        ts: e.ts,
+      });
+    });
     orch.on(
       'phase-tracker-updated',
       (
@@ -1701,6 +1738,14 @@ export class SessionManager extends EventEmitter {
         input: tu.input,
         ts,
       });
+      void this.recordMetric(ctx, {
+        kind: 'tool-call',
+        sessionId: ctx.id,
+        agent,
+        tool: tu.name,
+        filePath: this.extractToolFilePath(tu.input),
+        ts,
+      });
       // Specialist agents can also schedule wakeups for themselves; map
       // them through the existing wakeup runner using the agent's name
       // as the role label so the UI can attribute the wakeup correctly.
@@ -1853,6 +1898,14 @@ export class SessionManager extends EventEmitter {
         input: tu.input,
         ts,
       });
+      void this.recordMetric(ctx, {
+        kind: 'tool-call',
+        sessionId: ctx.id,
+        agent: 'supervisor',
+        tool: tu.name,
+        filePath: this.extractToolFilePath(tu.input),
+        ts,
+      });
       if (tu.name === 'ScheduleWakeup') {
         this.scheduleAgentWakeup(ctx, 'supervisor', tu.input);
       }
@@ -1955,6 +2008,14 @@ export class SessionManager extends EventEmitter {
         toolUseId: tu.id,
         name: tu.name,
         input: tu.input,
+        ts,
+      });
+      void this.recordMetric(ctx, {
+        kind: 'tool-call',
+        sessionId: ctx.id,
+        agent: 'developer',
+        tool: tu.name,
+        filePath: this.extractToolFilePath(tu.input),
         ts,
       });
       if (tu.name === 'ScheduleWakeup') {
@@ -2064,6 +2125,53 @@ export class SessionManager extends EventEmitter {
         error: (e as Error).message,
       });
     });
+    // Phase 2 telemetry — emit a `turn` event per CC result. Specialists
+    // (ui-dev, security, …) are bucketed with `dev` for the v1 rollup;
+    // the frontend can split via `toolCallsByAgent` if it wants finer
+    // granularity. Fire-and-forget; persistence isn't load-bearing.
+    void this.recordMetric(ctx, {
+      kind: 'turn',
+      sessionId: ctx.id,
+      who: role === 'supervisor' ? 'sup' : 'dev',
+      turnIndex: target.totalTurns,
+      ts,
+    });
+  }
+
+  /**
+   * Append a Phase 2 telemetry event to `<cwd>/.selfclaude/session-metrics.jsonl`.
+   * Errors are logged but never propagated — telemetry is best-effort
+   * and must not break the user-facing flow.
+   */
+  private async recordMetric(
+    ctx: SessionContext,
+    event: SessionMetricsEvent,
+  ): Promise<void> {
+    try {
+      await appendSessionMetricsEvent(ctx.cwd, event);
+    } catch (e) {
+      log('warn', 'session.metric_append_failed', {
+        id: ctx.id,
+        kind: event.kind,
+        error: (e as Error).message,
+      });
+    }
+  }
+
+  /**
+   * Heuristic: pull a file path out of a tool input record. Different
+   * Claude Code tools name the field differently (`file_path`, `path`,
+   * `notebook_path`, `filename`); we check the common ones in priority
+   * order and return the first non-empty string. Returns `undefined`
+   * when the tool didn't carry a path (Bash, ScheduleWakeup, ask_user…).
+   */
+  private extractToolFilePath(input: Record<string, unknown>): string | undefined {
+    const candidates = ['file_path', 'path', 'notebook_path', 'filename'];
+    for (const key of candidates) {
+      const v = input[key];
+      if (typeof v === 'string' && v.length > 0) return v;
+    }
+    return undefined;
   }
 
   /**

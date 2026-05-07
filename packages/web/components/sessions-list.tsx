@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   Boxes,
@@ -14,6 +15,8 @@ import {
   Sparkles,
   Trash2,
 } from 'lucide-react';
+import { api, type ProjectMetricsRollup } from '@/lib/api';
+import { cn } from '@/lib/cn';
 import type { Favorite, RecentEntry, SessionMeta } from '@/lib/types';
 
 /**
@@ -168,7 +171,7 @@ function PinnedCard({
       <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-amber-500/0 group-hover:bg-amber-500/70 transition-colors rounded-l" />
       <button
         onClick={onOpen}
-        className="w-full text-left flex items-center gap-2.5 rounded-md border border-border bg-bg-panel/70 hover:bg-bg-elevated hover:border-amber-700/40 p-3 pl-3.5 transition-colors"
+        className="w-full text-left flex items-start gap-2.5 rounded-md border border-border bg-bg-panel/70 hover:bg-bg-elevated hover:border-amber-700/40 p-3 pl-3.5 transition-colors"
       >
         <ProjectIcon cwd={favorite.cwd} variant="pinned" />
         <div className="min-w-0 flex-1">
@@ -183,6 +186,7 @@ function PinnedCard({
           <code className="text-[10px] font-mono text-zinc-500 truncate block">
             {favorite.cwd}
           </code>
+          <ProjectMetricsRow cwd={favorite.cwd} />
         </div>
         <button
           onClick={(e) => {
@@ -190,7 +194,7 @@ function PinnedCard({
             e.stopPropagation();
             onUnpin();
           }}
-          className="shrink-0 p-1 rounded text-zinc-600 hover:text-zinc-200 opacity-0 group-hover:opacity-100 transition-opacity"
+          className="shrink-0 mt-0.5 p-1 rounded text-zinc-600 hover:text-zinc-200 opacity-0 group-hover:opacity-100 transition-opacity"
           aria-label="unpin"
           title="Unpin"
         >
@@ -199,6 +203,135 @@ function PinnedCard({
       </button>
     </div>
   );
+}
+
+/**
+ * Phase 2 telemetry — compact metrics row beneath a pinned card. Shows
+ * RAW counters (turns / files / first-pass rate) primary, and an
+ * explicitly-labelled "Estimate (Nx baseline)" chip secondary. Per
+ * ROADMAP calibration #2: the estimate is *not* the headline number.
+ * Operators see actuals first; the estimate is a derived comparison
+ * with the baseline ratio surfaced in the tooltip so it can never
+ * masquerade as a measured value.
+ *
+ * Hidden entirely when a project has no metrics yet (fresh pin, never
+ * opened) — no point showing zeroes.
+ */
+function ProjectMetricsRow({ cwd }: { cwd: string }) {
+  const [rollup, setRollup] = useState<ProjectMetricsRollup | null>(null);
+  const [baseline, setBaseline] = useState<number>(() => readBaselineRatio());
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getProjectMetrics(cwd)
+      .then((r) => {
+        if (!cancelled) setRollup(r);
+      })
+      .catch(() => {
+        if (!cancelled) setRollup(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cwd]);
+  // Re-read baseline when the operator changes it from settings — the
+  // change-event fires from BaselineRatioControl below.
+  useEffect(() => {
+    const onStorage = () => setBaseline(readBaselineRatio());
+    window.addEventListener('selfclaude:baseline-changed', onStorage);
+    return () => window.removeEventListener('selfclaude:baseline-changed', onStorage);
+  }, []);
+
+  if (!rollup) return null;
+  const totalTurns = rollup.totalTurns.sup + rollup.totalTurns.dev;
+  if (totalTurns === 0 && rollup.filesTouched === 0) return null;
+
+  const c = rollup.phaseContract;
+  const passPct = c.distinctFilenames > 0 ? Math.round(c.firstPassRate * 100) : null;
+  const passColor =
+    passPct === null
+      ? 'text-zinc-500'
+      : passPct >= 80
+        ? 'text-emerald-300'
+        : passPct >= 50
+          ? 'text-amber-300'
+          : 'text-rose-300';
+
+  // Derived estimate. With baseline=1 the operator turned the panel
+  // off — show only raw counters. Otherwise estimateMin is the
+  // additional time (over wall-clock) the manual baseline would have
+  // implied.
+  const showEstimate = baseline > 1 && rollup.activeDurationMs > 0;
+  const baselineMs = rollup.activeDurationMs * (baseline - 1);
+  const estimateMin = Math.round(baselineMs / 60_000);
+
+  return (
+    <div className="flex items-center gap-2 mt-1.5 text-[10px] font-mono">
+      <span className="text-zinc-400 tabular-nums" title="cumulative supervisor + specialist turns">
+        {totalTurns} turns
+      </span>
+      <span className="text-zinc-600">·</span>
+      <span className="text-zinc-400 tabular-nums" title="distinct files touched across every session in this project">
+        {rollup.filesTouched} files
+      </span>
+      {passPct !== null && (
+        <>
+          <span className="text-zinc-600">·</span>
+          <span
+            className={cn('tabular-nums', passColor)}
+            title={
+              `phase-contract first-pass rate across this project — ${c.distinctFilenames} doc${c.distinctFilenames === 1 ? '' : 's'}, ` +
+              `${c.totalAttempts} total attempts, ${c.overrides} overrides`
+            }
+          >
+            {passPct}% first-pass
+          </span>
+        </>
+      )}
+      {showEstimate && (
+        <span
+          className="ml-auto px-1.5 py-px rounded border border-amber-900/40 bg-amber-950/20 text-amber-200/70 tabular-nums"
+          title={
+            `Estimate (${baseline}× baseline). ` +
+            `Active ${formatDurationMin(rollup.activeDurationMs)} actual. ` +
+            `At ${baseline}× the manual baseline would have implied ${formatDurationMin(rollup.activeDurationMs * baseline)} — ` +
+            `delta ≈ ${formatDurationMin(baselineMs)} saved. Configure baseline in Settings.`
+          }
+        >
+          ≈ {formatEstimate(estimateMin)} saved
+          <span className="ml-1 text-[9px] opacity-60 uppercase tracking-wider">
+            {baseline}×
+          </span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+const BASELINE_KEY = 'selfclaude:baseline-ratio';
+
+function readBaselineRatio(): number {
+  if (typeof window === 'undefined') return 3;
+  const raw = window.localStorage.getItem(BASELINE_KEY);
+  if (!raw) return 3;
+  const n = Number.parseFloat(raw);
+  if (!Number.isFinite(n) || n < 1 || n > 10) return 3;
+  return n;
+}
+
+function formatDurationMin(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+function formatEstimate(min: number): string {
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  const rem = min % 60;
+  return rem === 0 ? `${h}h` : `${h}h ${rem}m`;
 }
 
 /* ─── Section: Recent ───────────────────────────────────────────── */

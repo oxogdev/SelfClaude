@@ -470,4 +470,55 @@ export const api = {
       { method: 'DELETE' },
     );
   },
+  /**
+   * Phase 2 telemetry — live session rollup. Raw counters first, no
+   * estimates. Frontend renders `turns / tools / files / duration` in
+   * the session header strip; the project landing card may compose a
+   * labelled estimate from these primitives, but the API itself only
+   * serves raw numbers.
+   */
+  getSessionMetrics(id: string) {
+    return jsonFetch<SessionMetricsRollup>(`/api/sessions/${id}/metrics`);
+  },
+  /**
+   * Phase 2 telemetry — project rollup across every session for a
+   * given cwd. Used by the home-page project card.
+   */
+  getProjectMetrics(cwd: string) {
+    return jsonFetch<ProjectMetricsRollup>(
+      `/api/projects/metrics?cwd=${encodeURIComponent(cwd)}`,
+    );
+  },
 };
+
+/* ───── Phase 2 telemetry types ───── */
+
+export interface PhaseContractMetrics {
+  totalAttempts: number;
+  firstPassRate: number;
+  ultimateFilenames: number;
+  overrides: number;
+  distinctFilenames: number;
+}
+
+export interface SessionMetricsRollup {
+  sessionId: string;
+  startedAt: number;
+  endedAt: number | null;
+  durationMs: number;
+  turns: { sup: number; dev: number };
+  toolCalls: Record<string, number>;
+  toolCallsByAgent: Record<string, number>;
+  filesTouched: number;
+  filesTouchedByTool: Record<string, number>;
+  phaseContract: PhaseContractMetrics;
+}
+
+export interface ProjectMetricsRollup {
+  totalSessions: number;
+  totalTurns: { sup: number; dev: number };
+  toolCalls: Record<string, number>;
+  filesTouched: number;
+  phaseContract: PhaseContractMetrics;
+  activeDurationMs: number;
+}

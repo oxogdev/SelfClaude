@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Activity,
+  CheckCircle2,
   ChevronUp,
   Clock,
   DollarSign,
@@ -14,6 +15,7 @@ import {
   Pause,
   Zap,
 } from 'lucide-react';
+import { api, type SessionMetricsRollup } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import type { ChatLogEntry, RoleMetrics, SessionMeta } from '@/lib/types';
 
@@ -56,6 +58,32 @@ export function BottomToolbar({
     const id = setInterval(() => setNow(Date.now()), 5000);
     return () => clearInterval(id);
   }, []);
+
+  // Phase 2 telemetry — fetch session-level rollup so the toolbar can
+  // show the phase-contract pass-rate badge. Polls on the same 5s
+  // cadence as the wall clock; load is negligible (one tiny GET per
+  // session). Failures are silent — the badge just shows "—".
+  const [contractRollup, setContractRollup] = useState<SessionMetricsRollup | null>(null);
+  useEffect(() => {
+    if (!meta?.id) return;
+    let cancelled = false;
+    const fetchOnce = () => {
+      void api
+        .getSessionMetrics(meta.id)
+        .then((r) => {
+          if (!cancelled) setContractRollup(r);
+        })
+        .catch(() => {
+          /* silent */
+        });
+    };
+    fetchOnce();
+    const id = setInterval(fetchOnce, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [meta?.id]);
 
   if (!meta) {
     return (
@@ -154,6 +182,8 @@ export function BottomToolbar({
         label={fileCount > 0 ? `${fileCount} files` : '—'}
         color={fileCount > 0 ? 'text-purple-300' : 'text-zinc-500'}
       />
+      <Sep />
+      <ContractBadge rollup={contractRollup} />
       <div className="flex-1" />
       <MetricsBreakdown metrics={metrics} agentEntries={agentEntries} />
     </div>
@@ -278,6 +308,51 @@ function agentCostAccent(agent: string): string {
   if (agent === 'ui-dev') return 'text-violet-400';
   if (agent === 'security') return 'text-rose-400';
   return 'text-zinc-400';
+}
+
+/**
+ * Phase 2 telemetry — phase-contract pass-rate badge. Surfaces the
+ * Phase 1 determinism KPI: how often did sup write a phase doc that
+ * passed validation on the first attempt? Hidden when there are no
+ * attempts yet (most sessions never write a phase doc — early
+ * discovery / chat-only sessions).
+ *
+ * The percentage is a *measurement*, not a gate — the ROADMAP target
+ * is ≥80% by sprint end, but seeing 60% in the first weeks is
+ * expected and informational. Click the title attribute for context.
+ */
+function ContractBadge({ rollup }: { rollup: SessionMetricsRollup | null }) {
+  const c = rollup?.phaseContract;
+  if (!c || c.distinctFilenames === 0) {
+    return (
+      <Badge
+        icon={<CheckCircle2 size={10} />}
+        label="—"
+        color="text-zinc-500"
+        title="No phase docs validated this session yet"
+      />
+    );
+  }
+  const pct = Math.round(c.firstPassRate * 100);
+  const accent =
+    pct >= 80
+      ? 'text-emerald-300'
+      : pct >= 50
+        ? 'text-amber-300'
+        : 'text-rose-300';
+  return (
+    <Badge
+      icon={<CheckCircle2 size={10} />}
+      label={`${pct}% first-pass`}
+      color={accent}
+      title={
+        `Phase-contract first-pass rate: ${pct}% ` +
+        `(${c.distinctFilenames} doc${c.distinctFilenames === 1 ? '' : 's'} validated, ` +
+        `${c.totalAttempts} total attempt${c.totalAttempts === 1 ? '' : 's'}, ` +
+        `${c.overrides} override${c.overrides === 1 ? '' : 's'})`
+      }
+    />
+  );
 }
 
 function Sep() {
