@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { TabBar } from '@/components/tab-bar';
 import { StatusBar } from '@/components/status-bar';
@@ -42,6 +42,24 @@ export default function SessionPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Phase 3 demo CTA → home page navigates with the canned brief in
+  // `?firstMessage=...`. Captured ONCE on mount and only on first
+  // render — we don't want the URL change to repopulate the textarea
+  // after the operator has already typed something.
+  const [demoInitialInput, setDemoInitialInput] = useState<string>('');
+  useEffect(() => {
+    const fm = searchParams.get('firstMessage');
+    if (fm) {
+      setDemoInitialInput(fm);
+      // Strip the query so a refresh doesn't refill the input.
+      const url = new URL(window.location.href);
+      url.searchParams.delete('firstMessage');
+      window.history.replaceState({}, '', url.toString());
+    }
+    // Intentionally empty deps — read-once on mount.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: read-once intentional
+  }, []);
   const session = useSessionStore((s) => s.sessions[id]);
   const setSnapshot = useSessionStore((s) => s.setSnapshot);
   const applyEvent = useSessionStore((s) => s.applyEvent);
@@ -331,6 +349,7 @@ export default function SessionPage() {
               hasMoreHistory={session.hasMoreHistory}
               loadingHistory={session.loadingHistory}
               wakeups={derived?.wakeups ?? null}
+              initialInput={demoInitialInput}
             />
           </Panel>
           <PanelResizeHandle className="PanelResizeHandle" />

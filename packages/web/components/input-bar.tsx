@@ -84,6 +84,15 @@ export interface InputBarProps {
   hasPendingQuestion?: boolean;
   hasPendingApproval?: boolean;
   onSubmit: (text: string) => void;
+  /**
+   * Optional initial value to seed the textarea with. Phase 3 demo
+   * uses this: the home-page CTA navigates to the session with the
+   * canned brief in `?firstMessage=...`, which the page passes here.
+   * Operator reviews, edits if they want, then clicks send. Empty
+   * string after first render — once the operator has touched the
+   * field, we don't want a re-render to overwrite their text.
+   */
+  initialValue?: string;
 }
 
 export function InputBar({
@@ -92,8 +101,9 @@ export function InputBar({
   hasPendingQuestion = false,
   hasPendingApproval = false,
   onSubmit,
+  initialValue = '',
 }: InputBarProps) {
-  const [text, setText] = useState('');
+  const [text, setText] = useState(initialValue);
 
   const isSup = variant === 'sup';
   // 'dev' is an alias for 'developer' so the existing call sites

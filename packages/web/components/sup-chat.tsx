@@ -41,6 +41,7 @@ export function SupChat({
   hasMoreHistory,
   loadingHistory,
   wakeups,
+  initialInput,
 }: {
   chatLog: ChatLogEntry[];
   streamingTs: number | null;
@@ -56,6 +57,12 @@ export function SupChat({
   loadingHistory: boolean;
   /** Server-derived wakeup list (full session). Falls back to chatLog when null. */
   wakeups: DerivedState['wakeups'] | null;
+  /**
+   * Phase 3 demo — seed the chat textarea on first mount with the
+   * canned brief so the operator doesn't have to type anything to
+   * kick off the orchestration. Empty string by default.
+   */
+  initialInput?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const { isAtBottom, scrollToBottom } = useStickyBottom(
@@ -144,6 +151,7 @@ export function SupChat({
         hasPendingQuestion={hasPendingQuestion}
         hasPendingApproval={hasPendingApproval}
         onSubmit={onSubmit}
+        initialValue={initialInput}
       />
     </div>
   );

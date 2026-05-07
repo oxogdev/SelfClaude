@@ -342,32 +342,98 @@ function LandingSkeleton() {
 }
 
 /**
- * First-run landing block — replaces the previous flat "no projects yet"
- * panel with a more inviting CTA. Still single-button so the operator's
- * next click is unambiguous.
+ * First-run landing block — Phase 3 onboarding. Two paths side by
+ * side: (1) the canned 5-minute demo for first-time visitors who
+ * just want a "this actually works" moment, and (2) the real folder
+ * picker for operators who arrived with their own project.
+ *
+ * Per ROADMAP calibration #3: the demo must produce a *visible*
+ * artifact — here a single self-contained `index.html` the operator
+ * opens in their browser. The wow factor is the result, not the file
+ * tree.
  */
 function EmptyState({ onPick }: { onPick: () => void }) {
+  const router = useRouter();
+  const [demoBusy, setDemoBusy] = useState(false);
+  const [demoError, setDemoError] = useState<string | null>(null);
+
+  const startDemo = async () => {
+    if (demoBusy) return;
+    setDemoBusy(true);
+    setDemoError(null);
+    try {
+      const r = await api.startDemo();
+      // Pass the canned brief through the URL so the session page
+      // auto-fills the chat box on mount. The operator clicks Send to
+      // kick off the orchestration — gives them a beat to read the
+      // brief instead of running it autopilot.
+      const qs = new URLSearchParams({ firstMessage: r.prompt }).toString();
+      router.push(`/sessions/${r.sessionId}?${qs}`);
+    } catch (e) {
+      setDemoError((e as Error).message);
+      setDemoBusy(false);
+    }
+  };
+
   return (
-    <div className="rounded-lg border border-dashed border-border bg-gradient-to-b from-bg-subtle/40 to-transparent p-12 text-center">
-      <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-cyan-950/50 border border-cyan-800/40 mb-4">
-        <Sparkles size={20} className="text-cyan-400" />
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="rounded-lg border-2 border-cyan-800/40 bg-gradient-to-b from-cyan-950/20 to-transparent p-6 flex flex-col">
+        <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-cyan-950/60 border border-cyan-700/50 mb-3">
+          <Sparkles size={18} className="text-cyan-400" />
+        </div>
+        <h2 className="text-base font-medium text-zinc-100 mb-1">
+          5-minute demo
+        </h2>
+        <p className="text-xs text-zinc-500 leading-relaxed mb-4 flex-1">
+          Watch the supervisor delegate to the developer to build a tiny
+          portfolio HTML file. No prompt to write, no setup. End of run:
+          one-click open in your browser.
+        </p>
+        {demoError && (
+          <div className="mb-3 text-[11px] text-rose-300 bg-rose-950/30 border border-rose-900/40 rounded px-2 py-1">
+            {demoError}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={startDemo}
+          disabled={demoBusy}
+          className="inline-flex items-center justify-center gap-2 rounded-md bg-cyan-600 hover:bg-cyan-500 disabled:bg-cyan-800 disabled:cursor-wait px-4 py-2 text-sm font-medium text-white shadow-lg shadow-cyan-900/30"
+        >
+          {demoBusy ? (
+            <>
+              <Loader2 size={14} className="animate-spin" />
+              Spinning up demo…
+            </>
+          ) : (
+            <>
+              <Sparkles size={14} />
+              Try the demo
+            </>
+          )}
+        </button>
       </div>
-      <h2 className="text-lg font-medium text-zinc-200 mb-2">
-        Start your first project
-      </h2>
-      <p className="text-sm text-zinc-500 mb-6 max-w-md mx-auto leading-relaxed">
-        Pick a folder, fill the wizard, and SelfClaude's supervisor agent
-        will scaffold the project and start coordinating with the right
-        specialists.
-      </p>
-      <button
-        type="button"
-        onClick={onPick}
-        className="inline-flex items-center gap-2 rounded-md bg-cyan-600 hover:bg-cyan-500 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-cyan-900/30"
-      >
-        <FolderOpen size={15} />
-        Open project folder
-      </button>
+      <div className="rounded-lg border border-dashed border-border bg-bg-subtle/30 p-6 flex flex-col">
+        <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-zinc-900 border border-border mb-3">
+          <FolderOpen size={18} className="text-zinc-300" />
+        </div>
+        <h2 className="text-base font-medium text-zinc-100 mb-1">
+          Real project
+        </h2>
+        <p className="text-xs text-zinc-500 leading-relaxed mb-4 flex-1">
+          Already have a folder you want to work on? Pick it and the
+          wizard will set up SelfClaude in your project — fresh build or
+          discover-existing.
+        </p>
+        <button
+          type="button"
+          onClick={onPick}
+          className="inline-flex items-center justify-center gap-2 rounded-md border border-border bg-bg-elevated hover:bg-bg-panel px-4 py-2 text-sm font-medium text-zinc-100"
+        >
+          <FolderOpen size={14} />
+          Open project folder
+        </button>
+      </div>
     </div>
   );
 }

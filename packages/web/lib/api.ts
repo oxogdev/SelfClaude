@@ -489,6 +489,40 @@ export const api = {
       `/api/projects/metrics?cwd=${encodeURIComponent(cwd)}`,
     );
   },
+  /**
+   * Phase 3 — kick off the quickstart demo. Server creates a fresh
+   * workspace under `~/.selfclaude/demos/demo-<ts>/`, opens a session
+   * against it, and returns the canned brief for the chat box. The
+   * frontend navigates to the session and auto-fills the brief; the
+   * operator clicks send to start the orchestration.
+   */
+  startDemo() {
+    return jsonFetch<{ sessionId: string; cwd: string; prompt: string }>(
+      '/api/demo/start',
+      { method: 'POST' },
+    );
+  },
+  /**
+   * Phase 3 — open the demo artifact (typically `index.html`) in the
+   * operator's default app via the OS shell. Server enforces that
+   * `path` is rooted under `~/.selfclaude/demos/`.
+   */
+  openDemoArtifact(path: string) {
+    return jsonFetch<{ ok: boolean; opened: string }>('/api/demo/open', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    });
+  },
+  /**
+   * Phase 3 — probe whether the demo artifact has been written yet.
+   * The session header polls this so the "Open Result" button only
+   * appears once there is something to open.
+   */
+  demoArtifactExists(path: string) {
+    return jsonFetch<{ exists: boolean }>(
+      `/api/demo/artifact-exists?path=${encodeURIComponent(path)}`,
+    );
+  },
 };
 
 /* ───── Phase 2 telemetry types ───── */

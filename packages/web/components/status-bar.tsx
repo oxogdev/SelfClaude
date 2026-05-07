@@ -2,10 +2,23 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Check, ChevronLeft, Copy, Pin, PinOff } from 'lucide-react';
+import { Check, ChevronLeft, Copy, ExternalLink, Pin, PinOff, Sparkles } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { SessionMeta } from '@/lib/types';
 import { cn } from '@/lib/cn';
+
+/**
+ * Phase 3 demo: derive both whether this is a demo session and the
+ * absolute path of the artifact (`<cwd>/index.html`) from the meta.
+ * Hardcoded filename matches `DEMO_ARTIFACT_FILENAME` in core's
+ * demo-template.ts — when that changes, update both ends.
+ */
+const DEMO_DIR_PREFIX = '/.selfclaude/demos/';
+const DEMO_ARTIFACT_FILENAME = 'index.html';
+function demoArtifactPath(cwd: string): string | null {
+  if (!cwd.includes(DEMO_DIR_PREFIX)) return null;
+  return `${cwd.replace(/\/$/, '')}/${DEMO_ARTIFACT_FILENAME}`;
+}
 
 /**
  * Session header strip — back link, project label/cwd, and quick
@@ -97,6 +110,7 @@ export function StatusBar({ meta }: { meta: SessionMeta | null; busy?: boolean }
       </button>
 
       <div className="ml-auto flex items-center gap-1 shrink-0">
+        {meta?.cwd && <DemoOpenButton cwd={meta.cwd} />}
         <button
           type="button"
           onClick={togglePin}
@@ -125,5 +139,75 @@ export function StatusBar({ meta }: { meta: SessionMeta | null; busy?: boolean }
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Phase 3 demo — "Open Result" button. Surfaces only when the session's
+ * cwd lives under `~/.selfclaude/demos/` (so it's a demo workspace)
+ * AND the artifact `index.html` exists. Click → backend opens the
+ * file in the operator's default browser via OS shell.
+ *
+ * The existence probe runs every 4s while the session is open. Once
+ * the file appears, the button stays visible — even if the operator
+ * deletes the file, they can still click and get a "file not found"
+ * error from the API rather than a silently disabled button.
+ */
+function DemoOpenButton({ cwd }: { cwd: string }) {
+  const artifactPath = demoArtifactPath(cwd);
+  const [exists, setExists] = useState(false);
+  const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    if (!artifactPath) return;
+    let cancelled = false;
+    const probe = async () => {
+      try {
+        const r = await api.demoArtifactExists(artifactPath);
+        if (!cancelled && r.exists) setExists(true);
+      } catch {
+        /* silent */
+      }
+    };
+    void probe();
+    const id = setInterval(() => {
+      if (!exists) void probe();
+    }, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [artifactPath, exists]);
+
+  if (!artifactPath || !exists) return null;
+
+  const onClick = async () => {
+    if (pending) return;
+    setPending(true);
+    try {
+      await api.openDemoArtifact(artifactPath);
+    } catch (e) {
+      console.warn('open demo artifact failed:', (e as Error).message);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={pending}
+      className={cn(
+        'flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors',
+        'text-cyan-100 bg-cyan-700/40 hover:bg-cyan-600/60 border border-cyan-600/40',
+        pending && 'opacity-60 cursor-wait',
+      )}
+      title="Open the demo result in your browser"
+    >
+      <Sparkles size={12} />
+      <span>Open Result</span>
+      <ExternalLink size={11} className="opacity-70" />
+    </button>
   );
 }

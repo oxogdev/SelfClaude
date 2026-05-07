@@ -577,6 +577,110 @@ export function buildWebApi(manager: SessionManager): FastifyInstance {
   });
 
   /**
+   * Phase 3 — Quickstart demo. Creates a fresh demo workspace under
+   * `~/.selfclaude/demos/demo-<ts>/`, opens a session against it, and
+   * returns the canned demo prompt for the frontend to auto-fill in
+   * the chat box. The operator clicks send and watches the
+   * orchestration produce a single-file portfolio HTML in 2-3 turns.
+   *
+   * The demo dir is created lazily by Orchestrator.start() — we just
+   * pass the path; SessionManager handles the rest.
+   */
+  server.post('/api/demo/start', async (_req, reply) => {
+    const { newDemoWorkspaceDir, DEMO_PROMPT } = await import('./demo-template.js');
+    const { mkdir } = await import('node:fs/promises');
+    const cwd = newDemoWorkspaceDir();
+    try {
+      await mkdir(cwd, { recursive: true });
+      const meta = await manager.createSession({ cwd, label: 'Demo — Portfolio HTML' });
+      return { sessionId: meta.id, cwd: meta.cwd, prompt: DEMO_PROMPT };
+    } catch (e) {
+      return reply.code(500).send({ error: (e as Error).message });
+    }
+  });
+
+  /**
+   * Phase 3 — probe whether the demo artifact exists on disk yet.
+   * The frontend's "Open Result" button polls this every few seconds
+   * while sup + dev are working, and shows the button once the file
+   * appears. Path is constrained to the demos root for the same
+   * reason `/api/demo/open` is.
+   */
+  server.get('/api/demo/artifact-exists', async (req, reply) => {
+    const Schema = z.object({ path: z.string().min(1) });
+    const parsed = Schema.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
+    const { homedir } = await import('node:os');
+    const { join: joinPath } = await import('node:path');
+    const demosRoot = await realpath(joinPath(homedir(), '.selfclaude', 'demos')).catch(
+      () => null,
+    );
+    if (!demosRoot) return { exists: false };
+    let resolved: string;
+    try {
+      resolved = await realpath(parsed.data.path);
+    } catch {
+      return { exists: false };
+    }
+    const rel = relative(demosRoot, resolved);
+    if (rel.startsWith('..') || rel.startsWith('/') || rel.length === 0) {
+      return reply.code(400).send({ error: 'path is outside the demos directory' });
+    }
+    try {
+      const st = await stat(resolved);
+      return { exists: st.isFile() };
+    } catch {
+      return { exists: false };
+    }
+  });
+
+  /**
+   * Phase 3 — open the demo artifact in the operator's default app
+   * (browser for `.html`). Path is restricted to
+   * `~/.selfclaude/demos/`-rooted files to prevent the endpoint
+   * becoming an arbitrary-file launcher. Validates via realpath, not
+   * string-startsWith — symlinks must not bypass the boundary.
+   */
+  server.post('/api/demo/open', async (req, reply) => {
+    const Schema = z.object({ path: z.string().min(1) });
+    const parsed = Schema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
+    const { homedir } = await import('node:os');
+    const { join: joinPath } = await import('node:path');
+    const { spawn } = await import('node:child_process');
+    const demosRoot = await realpath(joinPath(homedir(), '.selfclaude', 'demos')).catch(
+      () => null,
+    );
+    if (!demosRoot) {
+      return reply.code(400).send({ error: 'demo root does not exist yet' });
+    }
+    let resolved: string;
+    try {
+      resolved = await realpath(parsed.data.path);
+    } catch {
+      return reply.code(404).send({ error: 'file not found' });
+    }
+    const rel = relative(demosRoot, resolved);
+    if (rel.startsWith('..') || rel.startsWith('/') || rel.length === 0) {
+      return reply.code(400).send({ error: 'path is outside the demos directory' });
+    }
+    const cmd =
+      process.platform === 'darwin'
+        ? 'open'
+        : process.platform === 'win32'
+          ? 'start'
+          : 'xdg-open';
+    const args = process.platform === 'win32' ? ['', resolved] : [resolved];
+    try {
+      const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+      child.unref();
+      return { ok: true, opened: resolved };
+    } catch (e) {
+      return reply.code(500).send({ error: (e as Error).message });
+    }
+  });
+
+  /**
    * Curated project-file index for the left sidebar. Returns a tree limited
    * to interesting top-level directories (`docs`, `prompts`, `.selfclaude`,
    * `.claude` if present) plus root-level Markdown / config so the operator
