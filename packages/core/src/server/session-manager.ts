@@ -29,6 +29,11 @@ import {
   appendSessionMetricsEvent,
   type SessionMetricsEvent,
 } from '../project/session-metrics-store.js';
+import {
+  bumpLastCommitAt,
+  readGitIsolation,
+} from '../project/git-isolation-store.js';
+import { commitTurn } from './git-isolation.js';
 import type { PhaseContractAttemptEvent } from '../orchestrator/phase-contracts.js';
 import {
   readPhases,
@@ -275,6 +280,24 @@ export interface SessionContext {
    * here keyed by agent name.
    */
   agentDeltaCount: Map<string, number>;
+  /**
+   * Phase 5 (Trust v1) — git isolation state for this session, when
+   * the operator has enabled it. `null` when no isolation is active
+   * (or when the workspace isn't a git repo). When set, every
+   * agent-completed turn auto-commits to `branch`; Accept/Discard
+   * use `originalBranch` to know where to merge or return.
+   *
+   * Persisted to `<cwd>/.selfclaude/git-isolation.json` so a daemon
+   * restart resumes the session on the same SC branch without
+   * forgetting which branch the operator was originally on.
+   */
+  gitIsolation: {
+    enabled: boolean;
+    branch: string;
+    originalBranch: string;
+    startedAt: number;
+    lastCommitAt: number | null;
+  } | null;
   agentThinkingDeltaCount: Map<string, number>;
 }
 
@@ -424,12 +447,14 @@ export class SessionManager extends EventEmitter {
       activeAgents: new Set(['developer']),
       agentDeltaCount: new Map(),
       agentThinkingDeltaCount: new Map(),
+      gitIsolation: null,
     };
     this.sessions.set(id, ctx);
     this.attachOrchestratorEvents(ctx);
     await this.restoreWakeups(ctx);
     await this.restoreActiveAgents(ctx);
     await this.restoreMetrics(ctx);
+    await this.restoreGitIsolation(ctx);
 
     // Phase 2 telemetry — session boundary marker. Goes into the JSONL
     // event log so cross-session rollups can compute per-session
@@ -2163,6 +2188,91 @@ export class SessionManager extends EventEmitter {
       turnIndex: target.totalTurns,
       ts,
     });
+    // Phase 5 (Trust v1) — auto-commit to the session branch when
+    // git-isolation is active. Fire-and-forget: a commit failure is
+    // logged but never breaks the session. The commit only happens
+    // when there are actual file changes — `commitTurn` no-ops on
+    // a clean tree (most "result" events from sup that didn't touch
+    // disk).
+    if (ctx.gitIsolation?.enabled) {
+      void this.autoCommitTurn(ctx, role, target.totalTurns, ts);
+    }
+  }
+
+  /**
+   * Phase 5 — auto-commit hook fired after every CC result event when
+   * isolation is active. Errors swallowed + logged: a flaky commit
+   * shouldn't surface as a fake session failure to the operator.
+   *
+   * The commit message includes role + turn index + file count so a
+   * `git log` on the session branch reads as a clear timeline of
+   * who-did-what.
+   */
+  private async autoCommitTurn(
+    ctx: SessionContext,
+    role: string,
+    turnIndex: number,
+    ts: number,
+  ): Promise<void> {
+    try {
+      const result = await commitTurn(
+        ctx.cwd,
+        `[selfclaude] ${role} turn ${turnIndex}`,
+      );
+      if (result.committed) {
+        log('info', 'git-isolation.commit', {
+          id: ctx.id,
+          role,
+          turn: turnIndex,
+          sha: result.sha,
+          files: result.filesChanged,
+        });
+        await bumpLastCommitAt(ctx.cwd, ts);
+        if (ctx.gitIsolation) ctx.gitIsolation.lastCommitAt = ts;
+      }
+    } catch (e) {
+      log('warn', 'git-isolation.commit_failed', {
+        id: ctx.id,
+        role,
+        turn: turnIndex,
+        error: (e as Error).message,
+      });
+    }
+  }
+
+  /**
+   * Phase 5 — rehydrate git isolation state on session boot. Reads
+   * `<cwd>/.selfclaude/git-isolation.json`, populates ctx.gitIsolation.
+   * If the file is missing the session simply has no isolation; that
+   * is the default shape and explicitly fine.
+   *
+   * We deliberately do NOT verify against the live git state here —
+   * the persisted record might claim isolation is enabled while the
+   * branch was deleted out-of-band. The frontend's polling loop reads
+   * branch-status separately and surfaces drift to the operator.
+   */
+  private async restoreGitIsolation(ctx: SessionContext): Promise<void> {
+    try {
+      const file = await readGitIsolation(ctx.cwd);
+      if (!file) return;
+      ctx.gitIsolation = {
+        enabled: file.enabled,
+        branch: file.branch,
+        originalBranch: file.originalBranch,
+        startedAt: file.startedAt,
+        lastCommitAt: file.lastCommitAt,
+      };
+      log('info', 'git-isolation.restored', {
+        id: ctx.id,
+        branch: file.branch,
+        originalBranch: file.originalBranch,
+      });
+    } catch (e) {
+      log('warn', 'git-isolation.restore_failed', {
+        id: ctx.id,
+        error: (e as Error).message,
+      });
+    }
   }
 
   /**

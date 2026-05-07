@@ -523,7 +523,88 @@ export const api = {
       `/api/demo/artifact-exists?path=${encodeURIComponent(path)}`,
     );
   },
+  /**
+   * Phase 5 (Trust v1) — combined repo + isolation snapshot used by
+   * the status-bar widget. One round-trip per poll instead of three
+   * separate calls.
+   */
+  getIsolationState(sessionId: string) {
+    return jsonFetch<IsolationStateView>(
+      `/api/sessions/${sessionId}/git/isolation-state`,
+    );
+  },
+  /** Phase 5 — create the SC branch from current HEAD; persists state. */
+  startIsolation(sessionId: string, branch: string) {
+    return jsonFetch<
+      | { ok: true; branch: string; originalBranch: string; startSha: string }
+      | { ok: false; reason: string; message: string }
+    >(`/api/sessions/${sessionId}/git/start`, {
+      method: 'POST',
+      body: JSON.stringify({ branch }),
+    });
+  },
+  /** Phase 5 — squash-merge the SC branch into original; clears state. */
+  acceptIsolation(
+    sessionId: string,
+    branch: string,
+    originalBranch: string,
+    message: string,
+  ) {
+    return jsonFetch<
+      | { ok: true; mergeSha?: string }
+      | { ok: false; reason: string; message: string }
+    >(`/api/sessions/${sessionId}/git/accept`, {
+      method: 'POST',
+      body: JSON.stringify({ branch, originalBranch, message }),
+    });
+  },
+  /** Phase 5 — drop the SC branch and restore original; clears state. */
+  discardIsolation(sessionId: string, branch: string, originalBranch: string) {
+    return jsonFetch<
+      | { ok: true }
+      | { ok: false; reason: string; message: string }
+    >(`/api/sessions/${sessionId}/git/discard`, {
+      method: 'POST',
+      body: JSON.stringify({ branch, originalBranch }),
+    });
+  },
 };
+
+/* ───── Phase 5 isolation types ───── */
+
+export interface IsolationRepoState {
+  isRepo: boolean;
+  currentBranch: string | null;
+  headSha: string | null;
+  dirty: boolean;
+}
+
+export interface IsolationPersisted {
+  enabled: boolean;
+  branch: string;
+  originalBranch: string;
+  startedAt: number;
+  lastCommitAt: number | null;
+}
+
+export interface IsolationBranchStatus {
+  commitCount: number;
+  filesChanged: number;
+  dirty: boolean;
+}
+
+export interface IsolationStateView {
+  repoState: IsolationRepoState;
+  isolation: IsolationPersisted | null;
+  branchStatus: IsolationBranchStatus | null;
+  /**
+   * `null` when isolation isn't active. `true` when the branch the
+   * persisted state names actually exists in git. `false` indicates
+   * drift — the operator (or another process) deleted the SC branch
+   * out-of-band; the UI surfaces this as a warning.
+   */
+  branchExistsOnDisk: boolean | null;
+}
 
 /* ───── Phase 2 telemetry types ───── */
 

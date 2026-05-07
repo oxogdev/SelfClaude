@@ -202,6 +202,50 @@ export function buildWebApi(manager: SessionManager): FastifyInstance {
     return detectRepoState(ctx.cwd);
   });
 
+  /**
+   * Combined state endpoint the UI polls every few seconds. Returns
+   * both repo metadata AND the persisted isolation state in one
+   * round-trip so the status-bar widget doesn't render a flicker
+   * waiting on two separate calls. When isolation is active and the
+   * branch exists, also includes live `branchStatus` so the badge
+   * can show commit counts without a third call.
+   */
+  server.get('/api/sessions/:id/git/isolation-state', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const ctx = manager.getSession(id);
+    if (!ctx) return reply.code(404).send({ error: 'session not found' });
+    const { detectRepoState, getBranchStatus, branchExists } = await import(
+      './git-isolation.js'
+    );
+    const [repoState, persisted] = await Promise.all([
+      detectRepoState(ctx.cwd),
+      Promise.resolve(ctx.gitIsolation),
+    ]);
+    let branchStatus: Awaited<ReturnType<typeof getBranchStatus>> | null = null;
+    let branchExistsOnDisk = false;
+    if (persisted?.enabled) {
+      branchExistsOnDisk = await branchExists(ctx.cwd, persisted.branch);
+      if (branchExistsOnDisk) {
+        try {
+          branchStatus = await getBranchStatus(
+            ctx.cwd,
+            persisted.branch,
+            persisted.originalBranch,
+          );
+        } catch {
+          /* drift — branch exists but originalBranch was deleted */
+        }
+      }
+    }
+    return {
+      repoState,
+      isolation: persisted,
+      branchStatus,
+      /** True when persisted state claims isolation but the branch is gone (drift). */
+      branchExistsOnDisk: persisted?.enabled ? branchExistsOnDisk : null,
+    };
+  });
+
   server.get('/api/sessions/:id/git/branch-status', async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const ctx = manager.getSession(id);
@@ -221,8 +265,28 @@ export function buildWebApi(manager: SessionManager): FastifyInstance {
     const parsed = Body.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
     const { createSessionBranch } = await import('./git-isolation.js');
+    const { writeGitIsolation } = await import('../project/git-isolation-store.js');
     const r = await createSessionBranch(ctx.cwd, parsed.data.branch);
     if (!r.ok) return reply.code(409).send(r);
+    // Persist the {branch, originalBranch} pair + hydrate the
+    // SessionContext so the auto-commit hook and the UI see consistent
+    // state on the very next turn.
+    const startedAt = Date.now();
+    await writeGitIsolation(ctx.cwd, {
+      version: 1,
+      enabled: true,
+      branch: r.branch,
+      originalBranch: r.originalBranch,
+      startedAt,
+      lastCommitAt: null,
+    });
+    ctx.gitIsolation = {
+      enabled: true,
+      branch: r.branch,
+      originalBranch: r.originalBranch,
+      startedAt,
+      lastCommitAt: null,
+    };
     return r;
   });
 
@@ -254,6 +318,7 @@ export function buildWebApi(manager: SessionManager): FastifyInstance {
     const parsed = Body.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
     const { acceptIntoOriginal } = await import('./git-isolation.js');
+    const { clearGitIsolation } = await import('../project/git-isolation-store.js');
     const r = await acceptIntoOriginal(
       ctx.cwd,
       parsed.data.branch,
@@ -261,6 +326,8 @@ export function buildWebApi(manager: SessionManager): FastifyInstance {
       parsed.data.message,
     );
     if (!r.ok) return reply.code(409).send(r);
+    await clearGitIsolation(ctx.cwd);
+    ctx.gitIsolation = null;
     return r;
   });
 
@@ -275,8 +342,11 @@ export function buildWebApi(manager: SessionManager): FastifyInstance {
     const parsed = Body.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
     const { discardBranch } = await import('./git-isolation.js');
+    const { clearGitIsolation } = await import('../project/git-isolation-store.js');
     const r = await discardBranch(ctx.cwd, parsed.data.branch, parsed.data.originalBranch);
     if (!r.ok) return reply.code(409).send(r);
+    await clearGitIsolation(ctx.cwd);
+    ctx.gitIsolation = null;
     return r;
   });
 

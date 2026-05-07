@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Check, ChevronLeft, Copy, ExternalLink, Pin, PinOff, Sparkles } from 'lucide-react';
 import { api } from '@/lib/api';
+import { IsolationWidget } from '@/components/isolation-widget';
 import type { SessionMeta } from '@/lib/types';
 import { cn } from '@/lib/cn';
 
@@ -110,6 +111,7 @@ export function StatusBar({ meta }: { meta: SessionMeta | null; busy?: boolean }
       </button>
 
       <div className="ml-auto flex items-center gap-1 shrink-0">
+        {meta?.id && <IsolationWidget sessionId={meta.id} />}
         {meta?.cwd && <DemoOpenButton cwd={meta.cwd} />}
         <button
           type="button"
