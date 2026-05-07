@@ -38,6 +38,14 @@ export const WritePhaseDocArgsSchema = z.object({
     .string()
     .regex(/^[\w][\w-]*\.md$/, 'filename must look like "00-overview.md" (slug + .md)'),
   content: z.string().min(1),
+  /**
+   * Bypass phase-contract validation for this write. Use ONLY after
+   * the operator has explicitly approved (via `ask_user`) that the
+   * doc is acceptable as-is. Sup must not flip this flag autonomously
+   * — the contract exists to keep briefs consistent across runs, and
+   * silently overriding defeats the determinism guarantee.
+   */
+  override: z.boolean().optional(),
 });
 export type WritePhaseDocArgs = z.infer<typeof WritePhaseDocArgsSchema>;
 

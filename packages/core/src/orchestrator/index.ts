@@ -9,6 +9,13 @@ import { initialState, transition, type FsmEvent, type FsmState } from './state-
 import { evaluatePolicy } from './policy.js';
 import { checkBashSafety } from './bash-safety.js';
 import { FileLockManager } from './file-locks.js';
+import {
+  buildOverrideRequiredMessage,
+  buildRetryMessage,
+  pickContractForFilename,
+  validatePhaseDoc,
+  type PhaseContractAttemptEvent,
+} from './phase-contracts.js';
 import { startHookServer } from '../hooks/server.js';
 import { installWorkspace, type WorkspacePaths } from '../hooks/installer.js';
 import type { Role } from '../hooks/types.js';
@@ -158,6 +165,18 @@ export class Orchestrator extends EventEmitter {
   private readonly pendingApprovals = new Map<string, PendingApproval>();
   private projectState: ProjectState | null = null;
   private statePath: string | null = null;
+  /**
+   * Per-filename attempt counter for phase-contract validation. Each
+   * failed `write_phase_doc` increments; a successful (or override)
+   * write resets to zero. After the contract's retry cap, the next
+   * failed attempt surfaces the override-required error so sup stops
+   * retrying autonomously and asks the operator instead.
+   *
+   * Lives in-memory: counters reset across orchestrator restarts,
+   * which is the right behaviour — a restart is a clean slate, sup
+   * gets the full retry budget again.
+   */
+  private readonly phaseDocAttempts = new Map<string, number>();
 
   constructor(readonly options: OrchestratorOptions) {
     super();
@@ -631,6 +650,15 @@ export class Orchestrator extends EventEmitter {
    * Write a phase doc into `<cwd>/docs/phases/<filename>`. Filename is
    * slug-validated upstream by zod; this method additionally guards against
    * path traversal (filename containing slashes or `..`) before writing.
+   *
+   * Phase-contract validation (Phase 1 — Determinism): if a contract
+   * applies to this filename, the body is validated against required
+   * sections + minimum bullet/word counts. On failure we throw a
+   * structured error that the MCP bridge surfaces back to sup as the
+   * tool result; sup naturally retries on its next turn with a
+   * corrected body. After the contract's retry cap, the error message
+   * pivots to "operator override required" so sup stops looping
+   * autonomously.
    */
   async writePhaseDoc(req: WritePhaseDocHttpRequest): Promise<{ path: string }> {
     if (!this.workspace) throw new Error('orchestrator not started');
@@ -644,6 +672,49 @@ export class Orchestrator extends EventEmitter {
     ) {
       throw new Error(`unsafe phase-doc filename: ${req.filename}`);
     }
+
+    // Phase contract validation. No applicable contract → bypass.
+    const contract = pickContractForFilename(req.filename);
+    if (contract) {
+      const result = validatePhaseDoc(req.content, contract);
+      const prev = this.phaseDocAttempts.get(req.filename) ?? 0;
+      const attemptNumber = prev + 1;
+      const override = req.override === true;
+
+      const event: PhaseContractAttemptEvent = {
+        filename: req.filename,
+        contractName: contract.name,
+        attemptNumber,
+        valid: result.valid,
+        override,
+        sectionsFound: result.sectionsFound,
+        sectionsMissing: result.sectionsMissing,
+        violationCount: result.violations.length,
+        ts: Date.now(),
+      };
+      this.emit('phase-contract-attempt', event);
+      log('info', 'phase-contract.attempt', {
+        filename: req.filename,
+        contract: contract.name,
+        attempt: attemptNumber,
+        valid: result.valid,
+        override,
+        missing: result.sectionsMissing,
+        violations: result.violations.length,
+      });
+
+      if (!result.valid && !override) {
+        this.phaseDocAttempts.set(req.filename, attemptNumber);
+        const message =
+          attemptNumber > contract.defaultRetryLimit
+            ? buildOverrideRequiredMessage(result, contract, attemptNumber)
+            : buildRetryMessage(result, contract, attemptNumber);
+        throw new Error(message);
+      }
+      // Valid OR override: reset so a future re-write starts fresh.
+      this.phaseDocAttempts.delete(req.filename);
+    }
+
     const phasesDir = join(this.workspace.cwd, 'docs', 'phases');
     await mkdir(phasesDir, { recursive: true });
     const target = join(phasesDir, safe);
@@ -656,6 +727,7 @@ export class Orchestrator extends EventEmitter {
       role: req.role,
       filename: req.filename,
       bytes: req.content.length,
+      override: req.override === true,
     });
     if (this.projectState && !this.projectState.phaseDocs.includes(req.filename)) {
       this.projectState.phaseDocs = [...this.projectState.phaseDocs, req.filename];

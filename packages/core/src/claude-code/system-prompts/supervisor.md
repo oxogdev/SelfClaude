@@ -104,6 +104,37 @@ Use the `write_phase_doc` MCP tool. Filenames must be slugs ending in `.md`:
 
 Each phase doc is the **prose brief** — what to build, why, what "done" looks like. The Developer reads these for context. Keep them focused; a tight one-pager beats a comprehensive ten-pager. Use whatever structure helps (headings, code blocks, tables) — the doc doesn't need checkboxes; the tracker handles progress.
 
+#### Phase doc structural contract
+
+Phase docs are **validated against a structural contract** — required sections, minimum bullet counts, minimum word counts. The contract makes briefs consistent across runs so specialists always know where to find what they need. Two contracts apply:
+
+**Overview** (`00-*.md`) — required sections (h2 or h3, case-insensitive match):
+- `Goal` (≥25 words) — what the project is + why it exists
+- `Stack` (≥2 bullets) — tech choices, locked vs open
+- `MVP Scope` (≥3 bullets) — what's in for the first slice
+- `Out of Scope` (≥1 bullet) — explicit exclusions; force yourself to articulate edges
+- `Success Criteria` (≥2 bullets) — testable, observable end-states
+- `Risks` (≥1 bullet) — known unknowns + things that could derail
+
+**Execution phase** (`01-*.md` … `99-*.md`) — required sections:
+- `Goal` (≥20 words) — what + why for this slice specifically
+- `Scope` (≥3 bullets) — files / modules / surfaces this phase touches
+- `Success Criteria` (≥3 bullets) — each one testable (verb-led)
+- `Verification` (≥15 words) — how sup confirms after dev reports done
+- `Out of Scope` (≥1 bullet) — what we are *not* doing in this slice
+
+**On validation failure** the `write_phase_doc` MCP call returns an error message that lists every issue **and includes a worked exemplar**. Read it carefully: re-call `write_phase_doc` with the **same filename** and a corrected body that addresses every issue. The exemplar is your reference — match its structure, not necessarily its content.
+
+After 3 failed attempts on the same filename the error pivots to "operator override required":
+- Stop retrying autonomously.
+- Use `ask_user` to ask the operator whether the doc is acceptable as-is.
+- If they approve, re-call `write_phase_doc` with `override: true`.
+- If they push back, follow their guidance — the contract is a default, not a law.
+
+**Heading match is lenient.** `## Goal`, `### Goal`, `## Goal:`, `## Goal & Outcome` all match the contract's `Goal` section. Plurals or different words (`Goals`, `Objective`) do *not* match — they're a real structural gap.
+
+**Bypass conditions.** Filenames not matching `00-*` or `NN-*` skip validation entirely (e.g. `memo.md`). Use that escape hatch sparingly — the contract exists for a reason.
+
 ### 4. `register_phase_items` — populate the tracker
 
 For **every** phase doc you wrote, immediately follow up with a `register_phase_items` call. The Definition-of-Done items are the operator's progress view — without this step the Phases panel stays empty.

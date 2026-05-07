@@ -93,7 +93,12 @@ const TOOLS = [
       'Write a project phase document into docs/phases/. Use during the documentation phase ' +
       'to record the project brief that the Developer agent will execute against. ' +
       'Filename must be a slug ending in .md (e.g. "00-overview.md", "01-foundation.md"). ' +
-      'Returns the absolute path written.',
+      'Returns the absolute path written.\n\n' +
+      'Phase docs are validated against a structural contract (required sections, ' +
+      'minimum bullet counts, minimum word counts). On validation failure, the call ' +
+      'returns an error message describing what is missing PLUS a worked exemplar — ' +
+      're-call the tool with the SAME filename and a corrected body that addresses ' +
+      'every issue. After 3 failed attempts, escalate to the operator via ask_user.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -104,6 +109,13 @@ const TOOLS = [
         content: {
           type: 'string',
           description: 'Markdown body of the phase doc.',
+        },
+        override: {
+          type: 'boolean',
+          description:
+            'Optional: bypass phase-contract validation. Use ONLY after the operator ' +
+            'has explicitly approved (via ask_user) that the doc is acceptable as-is. ' +
+            'Default false.',
         },
       },
       required: ['filename', 'content'],
@@ -316,8 +328,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       body: JSON.stringify({ ...args, role: ROLE }),
     });
     if (!resp.ok) {
+      // Surface the orchestrator's error message verbatim — for phase-contract
+      // validation failures the body is `{error: "<retry message + exemplar>"}`,
+      // and the model needs that text intact (HTTP status noise hurts the
+      // teach-the-pattern goal). Fall back to raw text for non-JSON errors.
       const detail = await resp.text().catch(() => '');
-      throw new Error(`orchestrator returned ${resp.status}: ${detail}`);
+      let msg = detail;
+      try {
+        const parsed = JSON.parse(detail) as { error?: unknown };
+        if (typeof parsed.error === 'string') msg = parsed.error;
+      } catch {
+        /* not JSON, fall through to raw text */
+      }
+      throw new Error(msg || `orchestrator returned ${resp.status}`);
     }
     const body = (await resp.json()) as { path: string };
     return { content: [{ type: 'text', text: `wrote ${body.path}` }] };
