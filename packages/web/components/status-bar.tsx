@@ -194,20 +194,32 @@ function DemoOpenButton({ cwd }: { cwd: string }) {
   };
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={pending}
-      className={cn(
-        'flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors',
-        'text-cyan-100 bg-cyan-700/40 hover:bg-cyan-600/60 border border-cyan-600/40',
-        pending && 'opacity-60 cursor-wait',
-      )}
-      title="Open the demo result in your browser"
-    >
-      <Sparkles size={12} />
-      <span>Open Result</span>
-      <ExternalLink size={11} className="opacity-70" />
-    </button>
+    <div className="relative flex items-center">
+      {/* Pulsing ring draws the eye for the first few seconds after the
+          file appears. `pointer-events-none` so it never blocks the
+          click. The animation keeps running — minimal cost, and a
+          steady glow stays helpful as the operator looks around the
+          UI for the first time. */}
+      <span
+        aria-hidden
+        className="absolute inset-0 rounded-md bg-cyan-400/30 animate-ping pointer-events-none"
+      />
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={pending}
+        className={cn(
+          'relative inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-semibold',
+          'bg-cyan-500 hover:bg-cyan-400 text-white shadow-lg shadow-cyan-900/40',
+          'ring-1 ring-cyan-300/60 transition-colors',
+          pending && 'opacity-70 cursor-wait',
+        )}
+        title="Demo ready — open the generated index.html in your browser"
+      >
+        <Sparkles size={14} className="text-cyan-100" />
+        <span>Open Result</span>
+        <ExternalLink size={12} className="opacity-90" />
+      </button>
+    </div>
   );
 }
