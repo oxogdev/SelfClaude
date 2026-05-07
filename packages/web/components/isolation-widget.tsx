@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Check, GitBranch, Loader2, RotateCcw, Trash2 } from 'lucide-react';
 import { api, type IsolationStateView } from '@/lib/api';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { cn } from '@/lib/cn';
 
 /**
@@ -30,6 +31,13 @@ export function IsolationWidget({ sessionId }: { sessionId: string }) {
     'idle' | 'starting' | 'accepting' | 'discarding'
   >('idle');
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Themed confirm flow. `null` = no dialog open. The two destructive
+   * actions (Accept squash-merge, Discard) parked here so the user
+   * sees a real modal with formatted prose instead of `window.confirm`'s
+   * single-line OS dialog.
+   */
+  const [confirmAction, setConfirmAction] = useState<'accept' | 'discard' | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -73,52 +81,50 @@ export function IsolationWidget({ sessionId }: { sessionId: string }) {
     }
   }, [state, pending, sessionId, refresh]);
 
-  const onAccept = useCallback(async () => {
+  // Accept / Discard click handlers just open the confirm dialog —
+  // the actual git op fires from `runConfirmedAction` below after the
+  // operator clicks through. Keeps the destructive paths gated behind
+  // a themed modal instead of the OS confirm.
+  const onAccept = useCallback(() => {
     if (!state?.isolation) return;
     if (pending !== 'idle') return;
-    const isolation = state.isolation;
-    const ok = window.confirm(
-      `Squash-merge ${isolation.branch} (${state.branchStatus?.commitCount ?? 0} commits) into ${isolation.originalBranch}?\n\n` +
-        `This collapses the per-turn history into ONE commit on ${isolation.originalBranch}, ` +
-        `then deletes ${isolation.branch}. The granular history disappears — be sure first.`,
-    );
-    if (!ok) return;
     setError(null);
-    setPending('accepting');
-    try {
-      const r = await api.acceptIsolation(
-        sessionId,
-        isolation.branch,
-        isolation.originalBranch,
-        `[selfclaude] session ${sessionId.slice(0, 8)} — accepted`,
-      );
-      if (!r.ok) setError(r.message);
-      await refresh();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setPending('idle');
-    }
-  }, [state, pending, sessionId, refresh]);
+    setConfirmAction('accept');
+  }, [state, pending]);
 
-  const onDiscard = useCallback(async () => {
+  const onDiscard = useCallback(() => {
     if (!state?.isolation) return;
     if (pending !== 'idle') return;
-    const isolation = state.isolation;
-    const ok = window.confirm(
-      `Discard ${isolation.branch} entirely?\n\n` +
-        `Every commit on the branch + any uncommitted changes will be wiped. ` +
-        `Worktree returns to ${isolation.originalBranch}'s HEAD. There is no undo.`,
-    );
-    if (!ok) return;
     setError(null);
-    setPending('discarding');
+    setConfirmAction('discard');
+  }, [state, pending]);
+
+  /**
+   * Fired when the operator confirms in the modal. Runs the chosen git
+   * op against the orchestrator endpoint and refreshes state on
+   * completion. The dialog closes synchronously before the call so the
+   * UI doesn't sit on a now-stale modal during the round-trip.
+   */
+  const runConfirmedAction = useCallback(async () => {
+    if (!state?.isolation || !confirmAction) return;
+    const isolation = state.isolation;
+    const action = confirmAction;
+    setConfirmAction(null);
+    setPending(action === 'accept' ? 'accepting' : 'discarding');
     try {
-      const r = await api.discardIsolation(
-        sessionId,
-        isolation.branch,
-        isolation.originalBranch,
-      );
+      const r =
+        action === 'accept'
+          ? await api.acceptIsolation(
+              sessionId,
+              isolation.branch,
+              isolation.originalBranch,
+              `[selfclaude] session ${sessionId.slice(0, 8)} — accepted`,
+            )
+          : await api.discardIsolation(
+              sessionId,
+              isolation.branch,
+              isolation.originalBranch,
+            );
       if (!r.ok) setError(r.message);
       await refresh();
     } catch (e) {
@@ -126,7 +132,7 @@ export function IsolationWidget({ sessionId }: { sessionId: string }) {
     } finally {
       setPending('idle');
     }
-  }, [state, pending, sessionId, refresh]);
+  }, [state, confirmAction, sessionId, refresh]);
 
   /* ─────────────────────────────────────────────────────────────────
    * All hooks fired unconditionally above. Below: pure JSX selection.
@@ -268,5 +274,48 @@ export function IsolationWidget({ sessionId }: { sessionId: string }) {
     }
   }
 
-  return <>{content}</>;
+  // Compose the modal copy from current state. Both messages cover
+  // exactly what the underlying git op does so the operator can't be
+  // surprised after the fact.
+  const isolation = state?.isolation ?? null;
+  const branchStatus = state?.branchStatus ?? null;
+  const dialogProps =
+    confirmAction === 'accept' && isolation
+      ? {
+          title: `Squash-merge into ${isolation.originalBranch}?`,
+          message:
+            `Collapse ${branchStatus?.commitCount ?? 0} commit(s) on ${isolation.branch} ` +
+            `into ONE squash commit on ${isolation.originalBranch}, then delete ${isolation.branch}.\n\n` +
+            `The per-turn granular history disappears — be sure first.`,
+          confirmLabel: 'Squash & accept',
+          variant: 'default' as const,
+        }
+      : confirmAction === 'discard' && isolation
+        ? {
+            title: `Discard ${isolation.branch}?`,
+            message:
+              `Every commit on the branch + any uncommitted changes will be wiped. ` +
+              `Worktree returns to ${isolation.originalBranch}'s HEAD.\n\n` +
+              `There is no undo.`,
+            confirmLabel: 'Discard',
+            variant: 'danger' as const,
+          }
+        : null;
+
+  return (
+    <>
+      {content}
+      {dialogProps && (
+        <ConfirmDialog
+          open={confirmAction !== null}
+          title={dialogProps.title}
+          message={dialogProps.message}
+          confirmLabel={dialogProps.confirmLabel}
+          variant={dialogProps.variant}
+          onConfirm={runConfirmedAction}
+          onCancel={() => setConfirmAction(null)}
+        />
+      )}
+    </>
+  );
 }
