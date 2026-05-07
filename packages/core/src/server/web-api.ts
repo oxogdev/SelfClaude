@@ -184,6 +184,103 @@ export function buildWebApi(manager: SessionManager): FastifyInstance {
   });
 
   /**
+   * Phase 5 (Trust v1) — git branch isolation endpoints. Each operates
+   * on a session's cwd. The module is intentionally stateless:
+   * caller passes branch + originalBranch on every call (the next
+   * sub-sprint persists the pair into a per-session isolation file
+   * and adds a status-bar widget that drives these from the UI).
+   *
+   * NOTHING here pushes, force-pushes, or modifies branches the
+   * operator created. See the safety contract at the top of
+   * git-isolation.ts.
+   */
+  server.get('/api/sessions/:id/git/repo-state', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const ctx = manager.getSession(id);
+    if (!ctx) return reply.code(404).send({ error: 'session not found' });
+    const { detectRepoState } = await import('./git-isolation.js');
+    return detectRepoState(ctx.cwd);
+  });
+
+  server.get('/api/sessions/:id/git/branch-status', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const ctx = manager.getSession(id);
+    if (!ctx) return reply.code(404).send({ error: 'session not found' });
+    const Q = z.object({ branch: z.string().min(1), originalBranch: z.string().min(1) });
+    const parsed = Q.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
+    const { getBranchStatus } = await import('./git-isolation.js');
+    return getBranchStatus(ctx.cwd, parsed.data.branch, parsed.data.originalBranch);
+  });
+
+  server.post('/api/sessions/:id/git/start', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const ctx = manager.getSession(id);
+    if (!ctx) return reply.code(404).send({ error: 'session not found' });
+    const Body = z.object({ branch: z.string().min(1) });
+    const parsed = Body.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
+    const { createSessionBranch } = await import('./git-isolation.js');
+    const r = await createSessionBranch(ctx.cwd, parsed.data.branch);
+    if (!r.ok) return reply.code(409).send(r);
+    return r;
+  });
+
+  server.post('/api/sessions/:id/git/commit', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const ctx = manager.getSession(id);
+    if (!ctx) return reply.code(404).send({ error: 'session not found' });
+    const Body = z.object({ message: z.string().min(1).max(500) });
+    const parsed = Body.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
+    const { commitTurn } = await import('./git-isolation.js');
+    try {
+      const r = await commitTurn(ctx.cwd, parsed.data.message);
+      return r;
+    } catch (e) {
+      return reply.code(500).send({ error: (e as Error).message });
+    }
+  });
+
+  server.post('/api/sessions/:id/git/accept', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const ctx = manager.getSession(id);
+    if (!ctx) return reply.code(404).send({ error: 'session not found' });
+    const Body = z.object({
+      branch: z.string().min(1),
+      originalBranch: z.string().min(1),
+      message: z.string().min(1).max(500),
+    });
+    const parsed = Body.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
+    const { acceptIntoOriginal } = await import('./git-isolation.js');
+    const r = await acceptIntoOriginal(
+      ctx.cwd,
+      parsed.data.branch,
+      parsed.data.originalBranch,
+      parsed.data.message,
+    );
+    if (!r.ok) return reply.code(409).send(r);
+    return r;
+  });
+
+  server.post('/api/sessions/:id/git/discard', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const ctx = manager.getSession(id);
+    if (!ctx) return reply.code(404).send({ error: 'session not found' });
+    const Body = z.object({
+      branch: z.string().min(1),
+      originalBranch: z.string().min(1),
+    });
+    const parsed = Body.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
+    const { discardBranch } = await import('./git-isolation.js');
+    const r = await discardBranch(ctx.cwd, parsed.data.branch, parsed.data.originalBranch);
+    if (!r.ok) return reply.code(409).send(r);
+    return r;
+  });
+
+  /**
    * Phase tracker — the structured progress source (`<cwd>/.selfclaude/phases.json`).
    * Supersedes the markdown-checkbox parser for sessions where the
    * supervisor has registered phase items via `register_phase_items`.
