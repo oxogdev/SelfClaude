@@ -54,6 +54,13 @@ export interface SessionState {
    * fires reliably even when the Scripts panel has never been opened.
    */
   pendingProposalAlert: import('./types').ScriptProposal | null;
+  /**
+   * Phase 7 sprint 2 — most recent turn-error event for this session.
+   * Set on `turn-error` SSE; cleared when the operator dismisses the
+   * banner. The banner component reads this directly so the prompt
+   * stays scoped to the active session.
+   */
+  lastTurnError: { code: string; role: string | null; message: string; ts: number } | null;
 }
 
 const emptyRoleMetrics = (): RoleMetrics => ({
@@ -96,6 +103,8 @@ interface MultiSessionState {
   setScripts(id: string, scripts: ScriptsFile): void;
   /** Clear the pending-proposal alert (operator dismissed the modal). */
   clearProposalAlert(id: string): void;
+  /** Dismiss the current turn-error banner (operator clicked X). */
+  dismissTurnError(id: string): void;
   applyEvent(id: string, event: SessionEvent): void;
   selectTool(id: string, toolUseId: string | null): void;
   remove(id: string): void;
@@ -117,6 +126,7 @@ const empty: SessionState = {
   phaseTracker: null,
   scripts: null,
   pendingProposalAlert: null,
+  lastTurnError: null,
 };
 
 const HISTORY_LIMIT = 1000;
@@ -226,6 +236,18 @@ export const useSessionStore = create<MultiSessionState>((set) => ({
         sessions: {
           ...s.sessions,
           [id]: { ...cur, pendingProposalAlert: null },
+        },
+      };
+    }),
+
+  dismissTurnError: (id) =>
+    set((s) => {
+      const cur = s.sessions[id];
+      if (!cur || cur.lastTurnError === null) return s;
+      return {
+        sessions: {
+          ...s.sessions,
+          [id]: { ...cur, lastTurnError: null },
         },
       };
     }),
@@ -716,8 +738,20 @@ export const useSessionStore = create<MultiSessionState>((set) => ({
           }
           break;
         case 'iteration-end':
+          // No state mutation needed.
+          break;
         case 'turn-error':
-          // No-op for state; could surface via toast in UI.
+          // Phase 7 sprint 2 — persist on the session so the
+          // banner can render. Cleared via `dismissTurnError`.
+          next = {
+            ...cur,
+            lastTurnError: {
+              code: event.code,
+              role: event.role,
+              message: event.message,
+              ts: Date.now(),
+            },
+          };
           break;
       }
       return { sessions: { ...s.sessions, [id]: next } };

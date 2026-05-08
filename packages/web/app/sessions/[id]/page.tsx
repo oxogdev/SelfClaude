@@ -15,6 +15,7 @@ import { IdleToast } from '@/components/idle-toast';
 import { ScriptProposalToast } from '@/components/script-proposal-toast';
 import { Drawer } from '@/components/drawer';
 import { ApprovalDialog } from '@/components/approval-dialog';
+import { TurnErrorBanner } from '@/components/turn-error-banner';
 import { FilePreviewModal } from '@/components/file-preview-modal';
 import { useSessionStore } from '@/lib/store';
 import { subscribeSession } from '@/lib/sse';
@@ -322,6 +323,7 @@ export default function SessionPage() {
     <div className="flex flex-col h-screen bg-bg">
       <TabBar />
       <StatusBar meta={session.meta} busy={session.busy} />
+      <TurnErrorBanner sessionId={id} />
       <div className="flex-1 min-h-0 flex">
         <FileSidebar sessionId={id} />
         {/* PanelGroup autoSaveId varies with the right-pane open state so

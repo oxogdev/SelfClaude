@@ -96,8 +96,13 @@ export type SessionEvent =
    * EventSource's native connection-error listener doesn't fire on
    * server-sent custom 'error' frames — that collision used to surface
    * a spurious "Lost connection" toast every time a turn aborted.
+   *
+   * Phase 7 sprint 2: payload now carries the classified `code` from
+   * the failure-mode catalogue. The frontend uses this to render a
+   * structured banner with the description + suggested action instead
+   * of just printing the raw message.
    */
-  | { kind: 'turn-error'; message: string }
+  | { kind: 'turn-error'; message: string; code: string; role: string | null }
   | { kind: 'turn-busy'; busy: boolean }
   | { kind: 'user-note-dev'; text: string; ts: number }
   | { kind: 'user-message-dev'; text: string; ts: number }
@@ -2322,7 +2327,7 @@ export class SessionManager extends EventEmitter {
   ): void {
     const code = classifyFailure(rawMessage);
     const message = rawMessage.length > 1024 ? `${rawMessage.slice(0, 1024)}…` : rawMessage;
-    this.emitEvent(ctx, { kind: 'turn-error', message: rawMessage });
+    this.emitEvent(ctx, { kind: 'turn-error', message: rawMessage, code, role });
     void this.recordMetric(ctx, {
       kind: 'failure',
       sessionId: ctx.id,

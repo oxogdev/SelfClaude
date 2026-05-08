@@ -290,8 +290,12 @@ export type SessionEvent =
   | { kind: 'approval-resolved'; id: string; decision: 'allow' | 'deny' }
   | { kind: 'iteration-end'; iteration: number }
   /** Turn-level failure (sup/dev/agent caught exception). NOT a connection
-   * error — those are signalled out-of-band via SSE's native `error` event. */
-  | { kind: 'turn-error'; message: string }
+   * error — those are signalled out-of-band via SSE's native `error` event.
+   * `code` matches a `FailureCode` from the catalogue; `role` is the
+   * agent that hit the failure (when known). Phase 7 sprint 2 added
+   * the structured fields so the UI can render a catalogue-driven
+   * banner instead of just the raw message. */
+  | { kind: 'turn-error'; message: string; code: string; role: string | null }
   | { kind: 'turn-busy'; busy: boolean }
   | { kind: 'user-note-dev'; text: string; ts: number }
   | { kind: 'user-message-dev'; text: string; ts: number }
