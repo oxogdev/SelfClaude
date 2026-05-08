@@ -1,7 +1,7 @@
 {
   "name": "selfclaude-monorepo",
   "version": "0.0.1",
-  "description": "Multi-agent orchestration for Claude Code — supervisor + specialists with you in the loop",
+  "description": "Multi-agent orchestration on top of Claude Code. Supervisor delegates, specialists execute, you gate. Browser-based IDE; local-first.",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -21,7 +21,10 @@
     "ai-agents",
     "multi-agent",
     "orchestration",
-    "developer-tools"
+    "developer-tools",
+    "agent-coordination",
+    "supervisor-agent",
+    "ai-coding-assistant"
   ],
   "engines": {
     "node": ">=20.0.0"
