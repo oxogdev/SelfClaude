@@ -262,6 +262,9 @@ export function RightPanelContent({
           <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-300 font-semibold">
             {RIGHT_TAB_LABELS[activeTab]}
           </span>
+          {activeTab === 'decisions' && (
+            <ExportDecisionsButton chatLog={chatLog} sessionId={sessionId} />
+          )}
         </div>
         <div className="flex-1 overflow-y-auto scrollbar-thin">
           {activeTab === 'tool-detail' && (
@@ -2603,50 +2606,18 @@ function buildDecisionTrail(chatLog: ChatLogEntry[]): DecisionEntry[] {
 
 function DecisionRoomPanel({
   chatLog,
-  sessionId,
 }: {
   chatLog: ChatLogEntry[];
-  sessionId: string;
+  /**
+   * Sprint 2 wires the Export button at the parent header level
+   * (`ExportDecisionsButton`); the panel no longer needs sessionId.
+   * Keeping the prop name in the parent's call-site for future use
+   * if the panel ever needs to re-fetch something on its own.
+   */
+  sessionId?: string;
 }) {
   const trail = useMemo(() => buildDecisionTrail(chatLog), [chatLog]);
   const [filter, setFilter] = useState<DecisionFilter>('all');
-  const [exporting, setExporting] = useState(false);
-
-  /**
-   * Pull the markdown report from the orchestrator endpoint and
-   * trigger a browser download. Filename comes from the response's
-   * `Content-Disposition`; falls back to a generic name when the
-   * header isn't present (older proxies sometimes strip it).
-   *
-   * Disabled while a previous export is in flight so a double-click
-   * doesn't fire two downloads.
-   */
-  const onExport = useCallback(async () => {
-    if (exporting) return;
-    setExporting(true);
-    try {
-      const res = await fetch(`/api/sessions/${sessionId}/decision-report`);
-      if (!res.ok) {
-        // biome-ignore lint/suspicious/noConsole: surface failure visibly
-        console.warn('decision report export failed:', res.status, res.statusText);
-        return;
-      }
-      const disposition = res.headers.get('Content-Disposition') ?? '';
-      const match = disposition.match(/filename="([^"]+)"/);
-      const filename = match?.[1] ?? `decision-report-${sessionId.slice(0, 8)}.md`;
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } finally {
-      setExporting(false);
-    }
-  }, [exporting, sessionId]);
 
   const filtered = useMemo(() => {
     if (filter === 'all') return trail;
@@ -2681,37 +2652,7 @@ function DecisionRoomPanel({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-stretch border-b border-border/50 bg-bg-subtle/40">
-        <div className="flex-1 min-w-0">
-          <DecisionFilterChips
-            filter={filter}
-            onFilter={setFilter}
-            counts={counts}
-            embedded
-          />
-        </div>
-        <button
-          type="button"
-          onClick={onExport}
-          disabled={exporting || trail.length === 0}
-          className={cn(
-            'shrink-0 flex items-center gap-1 px-2.5 text-[10px] font-medium uppercase tracking-wider text-zinc-400 hover:text-cyan-200 hover:bg-bg-elevated transition-colors border-l border-border/50',
-            (exporting || trail.length === 0) && 'opacity-50 cursor-not-allowed',
-          )}
-          title={
-            trail.length === 0
-              ? 'No decisions to export yet'
-              : 'Export the decision trail as a shareable markdown file'
-          }
-        >
-          {exporting ? (
-            <Loader2 size={11} className="animate-spin" />
-          ) : (
-            <Download size={11} />
-          )}
-          <span>Export</span>
-        </button>
-      </div>
+      <DecisionFilterChips filter={filter} onFilter={setFilter} counts={counts} />
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         {filtered.length === 0 ? (
           <div className="p-3 text-[11px] text-zinc-500 italic">
@@ -2726,6 +2667,81 @@ function DecisionRoomPanel({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Mini Export button rendered inside the right-sidebar's tab title
+ * bar. Triggered by `RightPanelContent` when `activeTab === 'decisions'`
+ * so the button takes up zero space when the operator is viewing any
+ * other panel. Disabled when the trail is empty (nothing to export).
+ *
+ * Keeping it standalone (instead of inside DecisionRoomPanel) means
+ * the panel's filter chip strip can use the full row width without
+ * fighting the export button for space.
+ */
+function ExportDecisionsButton({
+  chatLog,
+  sessionId,
+}: {
+  chatLog: ChatLogEntry[];
+  sessionId: string;
+}) {
+  const trail = useMemo(() => buildDecisionTrail(chatLog), [chatLog]);
+  const [exporting, setExporting] = useState(false);
+
+  const onExport = useCallback(async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/decision-report`);
+      if (!res.ok) {
+        // biome-ignore lint/suspicious/noConsole: surface failure visibly
+        console.warn('decision report export failed:', res.status, res.statusText);
+        return;
+      }
+      const disposition = res.headers.get('Content-Disposition') ?? '';
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match?.[1] ?? `decision-report-${sessionId.slice(0, 8)}.md`;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  }, [exporting, sessionId]);
+
+  const disabled = exporting || trail.length === 0;
+  return (
+    <button
+      type="button"
+      onClick={onExport}
+      disabled={disabled}
+      className={cn(
+        'ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium uppercase tracking-wider transition-colors',
+        disabled
+          ? 'text-zinc-600 cursor-not-allowed'
+          : 'text-zinc-400 hover:text-cyan-200 hover:bg-bg-elevated',
+      )}
+      title={
+        trail.length === 0
+          ? 'No decisions to export yet'
+          : 'Export the decision trail as a shareable markdown file'
+      }
+    >
+      {exporting ? (
+        <Loader2 size={10} className="animate-spin" />
+      ) : (
+        <Download size={10} />
+      )}
+      <span>Export</span>
+    </button>
   );
 }
 
