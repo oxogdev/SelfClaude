@@ -145,6 +145,45 @@ export function buildWebApi(manager: SessionManager): FastifyInstance {
   });
 
   /**
+   * Phase 6 (Replay & audit) sprint 2 — markdown decision report.
+   * Reads the full chat-log for this session, runs it through the
+   * decision-report formatter, and serves the result as a downloadable
+   * `.md` file. The frontend's "Export" button on the Decision Trail
+   * panel triggers this endpoint and saves the response with the
+   * suggested filename.
+   *
+   * No auth (loopback-bound API). The chat-log is the operator's own
+   * data — they're the only consumer.
+   */
+  server.get('/api/sessions/:id/decision-report', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const ctx = manager.getSession(id);
+    if (!ctx) return reply.code(404).send({ error: 'session not found' });
+    const { readChatLog } = await import('../project/chat-log.js');
+    const { decisionReportFilename, formatDecisionReport } = await import(
+      './decision-report.js'
+    );
+    const chatLog = await readChatLog(ctx.cwd);
+    const firstEntryAt = chatLog.length > 0 ? chatLog[0]!.ts : null;
+    const lastEntryAt = chatLog.length > 0 ? chatLog[chatLog.length - 1]!.ts : null;
+    const meta = {
+      label: ctx.label,
+      cwd: ctx.cwd,
+      sessionId: id,
+      generatedAt: Date.now(),
+      firstEntryAt,
+      lastEntryAt,
+    };
+    const md = formatDecisionReport(chatLog, meta);
+    const filename = decisionReportFilename(meta);
+    reply
+      .type('text/markdown; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="${filename}"`)
+      .send(md);
+    return reply;
+  });
+
+  /**
    * Phase 2 telemetry — per-session rollup of activity metrics.
    * Reads the `<cwd>/.selfclaude/session-metrics.jsonl` event log,
    * filters to this session id, and returns a rollup with raw
