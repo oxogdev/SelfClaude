@@ -2,6 +2,7 @@
 import { resolve } from 'node:path';
 import { Command } from 'commander';
 import { daemonLogs, daemonStart, daemonStatus, daemonStop } from './daemon.js';
+import { openUrl } from './open-url.js';
 import { ensurePreflight } from './preflight.js';
 
 const program = new Command();
@@ -141,13 +142,7 @@ async function runWebMode(opts: {
 
   const browserUrl = `http://127.0.0.1:${opts.nextPort}/`;
   if (opts.openBrowser) {
-    setTimeout(() => {
-      try {
-        spawn('open', [browserUrl], { detached: true, stdio: 'ignore' }).unref();
-      } catch {
-        /* best effort */
-      }
-    }, 3500);
+    setTimeout(() => openUrl(browserUrl), 3500);
   }
   console.log(`✓ Web UI: ${browserUrl}`);
 

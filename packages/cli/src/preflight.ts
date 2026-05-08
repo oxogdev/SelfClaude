@@ -16,6 +16,7 @@ import { execFileSync } from 'node:child_process';
  */
 export function ensurePreflight(): void {
   ensureClaudeCli();
+  ensureStreamJsonInputSupported();
 }
 
 function ensureClaudeCli(): void {
@@ -38,5 +39,62 @@ function ensureClaudeCli(): void {
       ].join('\n'),
     );
     process.exit(1);
+  }
+}
+
+/**
+ * Verify the installed `claude` binary supports `--input-format stream-json`,
+ * the IPC SelfClaude uses to feed prompts into a CC subprocess. Older CC
+ * releases shipped with stream-json *output* but not *input*; the
+ * orchestrator would otherwise fail at first turn with a confusing CC
+ * error.
+ *
+ * We invoke `claude -p --input-format stream-json --output-format stream-json`
+ * with no payload and a tight 5s timeout; CC exits quickly when its argv
+ * parsing succeeds. If the `--input-format` flag is unknown, CC emits a
+ * usage error containing the flag name on stderr — that's the marker we
+ * match. Any other failure is treated as a runtime concern (auth, network)
+ * and left for the orchestrator to surface at first turn.
+ *
+ * Adopted from PR #1 (Ersin KOÇ) — caught a real footgun for users still
+ * on a months-old `claude` binary.
+ */
+function ensureStreamJsonInputSupported(): void {
+  try {
+    execFileSync(
+      'claude',
+      ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json'],
+      { stdio: ['ignore', 'pipe', 'pipe'], timeout: 5_000 },
+    );
+  } catch (e) {
+    const err = e as { stderr?: Buffer | string };
+    const stderr =
+      typeof err.stderr === 'string'
+        ? err.stderr
+        : err.stderr instanceof Buffer
+          ? err.stderr.toString('utf8')
+          : '';
+    if (stderr.includes('--input-format')) {
+      process.stderr.write(
+        [
+          '',
+          '✗ The installed `claude` CLI is too old for SelfClaude.',
+          '',
+          'SelfClaude requires `--input-format stream-json` support, which landed',
+          'in a recent Claude Code release. Update with:',
+          '',
+          '  npm update -g @anthropic-ai/claude-code',
+          '  # or follow https://docs.claude.com/en/docs/claude-code/quickstart',
+          '',
+          'After updating, run `claude` once to confirm sign-in, then re-run',
+          '`selfclaude start`.',
+          '',
+        ].join('\n'),
+      );
+      process.exit(1);
+    }
+    // Any other error class (timeout, auth, network) is not a version
+    // problem — let the orchestrator surface the real issue when it
+    // tries its first turn. Preflight is best-effort, not a gate.
   }
 }

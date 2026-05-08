@@ -10,6 +10,7 @@ import {
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
+import { openUrl } from './open-url.js';
 
 /**
  * Ports the daemon binds. Anything alive on these is a stray we need to
@@ -135,13 +136,7 @@ export async function daemonStart(opts: DaemonStartOptions = {}): Promise<void> 
     console.log(`SelfClaude already running (pid ${existing}).`);
     console.log(`  Web UI: ${WEB_UI_URL(webPort)}`);
     console.log('  Stop:   selfclaude stop');
-    if (openBrowser) {
-      try {
-        spawn('open', [WEB_UI_URL(webPort)], { detached: true, stdio: 'ignore' }).unref();
-      } catch {
-        /* best effort */
-      }
-    }
+    if (openBrowser) openUrl(WEB_UI_URL(webPort));
     return;
   }
 
@@ -198,13 +193,7 @@ export async function daemonStart(opts: DaemonStartOptions = {}): Promise<void> 
     process.exit(1);
   }
 
-  if (openBrowser) {
-    try {
-      spawn('open', [WEB_UI_URL(webPort)], { detached: true, stdio: 'ignore' }).unref();
-    } catch {
-      /* best effort */
-    }
-  }
+  if (openBrowser) openUrl(WEB_UI_URL(webPort));
 
   console.log(`✓ SelfClaude started (pid ${child.pid})`);
   console.log(`  Web UI: ${WEB_UI_URL(webPort)}`);
