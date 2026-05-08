@@ -6,6 +6,7 @@ dist/
 *.log
 .DS_Store
 .selfclaude/
+.claude/
 coverage/
 .tsbuildinfo
 *.tsbuildinfo
