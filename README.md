@@ -1,6 +1,6 @@
 # SelfClaude
 
-A multi-agent layer for [Claude Code](https://docs.claude.com/en/docs/claude-code/quickstart). When a single CC session has to juggle frontend + backend + tests + security in one conversation, context drifts and the work gets sloppy. SelfClaude delegates each concern to its own specialist (separate subprocess, separate context window); a supervisor coordinates and reports back to you.
+A multi-agent layer for [Claude Code](https://docs.claude.com/en/docs/claude-code/quickstart). Instead of one CC session juggling frontend + backend + tests + security and slowly losing the thread, SelfClaude delegates each concern to its own specialist (separate subprocess, separate context); a supervisor coordinates and reports back to you.
 
 Install Claude Code first if you don't already use it — this is a layer, not a replacement.
 
@@ -21,20 +21,27 @@ refactorer       Refused: "typecheck on the baseline already has 3 errors in
                  src/server.ts. Refactoring on a red tree is unsafe — please
                  re-route to developer to fix those first."
 sup              Fair. Re-routing.
+
 sup → developer  Fix the 3 typecheck errors in src/server.ts.
-developer        Edit src/server.ts (+9, -7). typecheck green.
+developer        Edit src/server.ts (+9, -7).
+                 Bash: pnpm typecheck → 1 error remaining (missed import).
+developer        Edit src/server.ts (+1, -0).
+                 Bash: pnpm typecheck → green.
+
 sup → refactorer Now split route registration as planned.
 refactorer       Edit src/server.ts (-15), Edit src/routes.ts (+18).
-                 typecheck green, tests pass (12/12).
-sup → tester     Re-run the smoke suite to be sure.
-tester           Ran `pnpm test` → 12 passed in 1.4s.
+                 Bash: pnpm test → 12/12 pass.
+
+sup              I should run tester separately to double-check?
+you              No, refactorer already ran the suite. Continue.
 sup              Phase complete.
 ```
 
-Three things to notice:
+Four things to notice:
 1. **Refactorer refused.** Its contract says "no rework on a red baseline." Sup adapted instead of forcing.
-2. **Sup re-routed.** Failed delegation isn't a failure — it's the contract working.
-3. **Two commits land** on a session-scoped git branch (if isolation is enabled — one-click toggle in the status bar). Click **Accept** to squash-merge into your branch, **Discard** to wipe the branch and restore the worktree.
+2. **Developer's first fix was incomplete.** Forgot an import; typecheck caught it; second pass fixed it. Real turns aren't one-shot.
+3. **Sup over-asked at the end.** It wanted to re-run the suite via `tester` even though `refactorer` had already run it. You corrected the redundancy in one line — sup logged your intervention and moved on.
+4. **Two commits land** on a session-scoped git branch (if isolation is enabled — one-click toggle in the status bar). Click **Accept** to squash-merge into your branch, **Discard** to wipe the branch and restore the worktree.
 
 ---
 
@@ -44,17 +51,19 @@ Three things to notice:
 curl -fsSL https://raw.githubusercontent.com/badursun/SelfClaude/main/install.sh | bash
 ```
 
-**What this script does NOT do** (verifiable by reading the 175-line bash):
-- No `sudo`, no root prompts.
-- Does not touch `/etc`, `/usr`, `~/.bashrc`, or any system config.
-- Does not modify your global `~/.claude/settings.json` — your existing Claude Code setup is left exactly where it is.
-- Does not write anywhere outside `~/.selfclaude/` and a single symlink target.
+The script lives at [install.sh](./install.sh) — read it first if piping random scripts to bash makes you uneasy. (Reasonable.)
 
-What it does:
-1. **Pre-flights** Node ≥20, pnpm (auto-installs via corepack if missing), and `claude` CLI signed in. Aborts with a fix-it message if any are missing.
-2. **Clones** into `~/.selfclaude/app/`.
-3. **Installs** dependencies via `pnpm install --frozen-lockfile`. No global npm installs.
-4. **Symlinks** a `selfclaude` command into `/usr/local/bin` (or `~/.local/bin` if you don't have write access).
+**It does not:**
+- ask for `sudo` or root.
+- touch `/etc`, `/usr`, `~/.bashrc`, or any system config.
+- modify your global `~/.claude/settings.json` — your existing Claude Code setup is left exactly where it is.
+- write anywhere outside `~/.selfclaude/` and a single symlink target.
+
+**What it does:**
+1. Pre-flights Node ≥20, pnpm (auto-installs via corepack if missing), and `claude` CLI signed in. Aborts with a fix-it message if any are missing.
+2. Clones into `~/.selfclaude/app/`.
+3. Runs `pnpm install --frozen-lockfile` inside that dir. No global npm installs.
+4. Symlinks a `selfclaude` command into `/usr/local/bin` (or `~/.local/bin` if no write access).
 
 Removes cleanly: `rm -rf ~/.selfclaude/` plus deleting the symlink. Re-running the install command updates by `git pull` — idempotent.
 
@@ -74,21 +83,21 @@ The empty home page also has a **5-minute demo** button — it scaffolds a singl
 
 ## What can break
 
-Real things, observed during development. Each item has a one-line user impact.
+Real things, observed during development. Listed worst-first by user impact, not roadmap importance.
 
-- **Long sessions get expensive fast.** A 1-hour session can burn through more API credit than the same work split into 4 fresh sessions, because token cost grows with conversation length and there's no auto-checkpoint yet. Watch the cost badge in the bottom toolbar; restart when it's growing faster than the work is.
+- **`ExitPlanMode` freezes the turn.** [hard lock] No UI affordance to approve plan-mode exits yet. The `security` agent has been explicitly prompted not to call `ExitPlanMode` (returns findings as text; sup writes the report file as proxy). If you write a custom prompt for an agent in plan mode, instruct it the same way or your turn will hang on `Exit plan mode?` and you'll need to abort + restart.
 
-- **Sup picks the wrong agent ~5–10% of the time.** Phase 8's decision rubric reduces this but doesn't eliminate it. If you see a feature task land on `tester` or a refactor land on `developer`, intervene with a clarifying message — sup will re-route.
+- **Parallel agents share one git branch.** [silent corruption risk] Phase 5 isolates the *session*, not individual agents. Two parallel agents writing to the same file fall back to the in-memory file-lock manager, which prevents the in-flight Edit collision but doesn't help if both ended up committing changes that conflict. Per-agent worktree (Phase 5b) is on the roadmap; for now, prefer serial dispatch when two agents touch the same file.
 
-- **Plan-mode `ExitPlanMode` calls freeze the turn.** No UI affordance to approve them yet. The `security` agent has been explicitly prompted not to call `ExitPlanMode` (returns findings as text; sup writes the report file as proxy). If you write a custom prompt for an agent in plan mode, instruct it the same way or your turn will hang on `Exit plan mode?`.
+- **Long sessions get expensive fast.** [money risk, recoverable] A 1-hour session can burn through more API credit than the same work split into 4 fresh sessions, because token cost grows with conversation length and there's no auto-checkpoint yet. Watch the cost badge in the bottom toolbar; restart when it's growing faster than the work is.
 
-- **Parallel agents share one git branch.** Phase 5 isolates the *session*, not individual agents. Two parallel agents writing to the same file fall back to the in-memory file-lock manager, which prevents the in-flight Edit collision but doesn't help if both happened to commit on the same line. Per-agent worktree (Phase 5b) is on the roadmap; for now, prefer serial dispatch when two agents touch the same file.
+- **Sup picks the wrong agent ~5–10% of the time.** [quality, recoverable] Phase 8's decision rubric reduces this but doesn't eliminate it. If you see a feature task land on `tester` or a refactor land on `developer`, intervene with a clarifying message — sup will re-route.
 
-- **Stuck detector misfires during long discovery.** Default threshold is 5 minutes without a file change or phase decision. If sup is genuinely thinking through an ambiguous spec with you, the amber banner will pop. Ignore it; or edit the threshold in `~/.selfclaude/settings.json` (eventually — currently hardcoded).
+- **Stuck detector misfires during long discovery.** [UX nuisance] Default threshold is 5 minutes without a file change or phase decision. If sup is genuinely thinking through an ambiguous spec with you, the amber banner will pop. Dismiss it.
 
-- **Linux works but is less tested than macOS.** Hook scripts assume `bash 4+`, `lsof`, `ps`. On Alpine + busybox you'll hit issues. Windows is entirely untested.
+- **Linux works but is less tested than macOS.** [env-specific] Hook scripts assume `bash 4+`, `lsof`, `ps`. On Alpine + busybox you'll hit issues. Windows is entirely untested.
 
-- **It's v0.x.** Breaking changes between minor versions are possible until 1.0.
+- **It's v0.x.** [general] Breaking changes between minor versions are possible until 1.0.
 
 If any of these are dealbreakers — wait a release cycle, or open an issue describing your specific failure mode.
 
