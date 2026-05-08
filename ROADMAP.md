@@ -11,19 +11,49 @@
 
 ## 1. Where we stand
 
-- **v0.0.1 shipped (2026-05-06).** Public repo, install.sh, MIT, CI.
-- **What works:** sup + developer/ui-dev/security agents, Web UI with
-  tabs + chat + dev timeline + tool detail + drawer, hook-based
-  question/approval flow, chat-log persistence, recents + pinned,
-  optional Telegram + Chrome verification, MCP integrations.
-- **Test baseline:** 189 unit + 9 integration, all green.
-- **What it isn't yet:** a *product*. PoC works for the author; not yet
-  reliably reproducible for arbitrary users on arbitrary repos.
+**Last update: 2026-05-08.** Major roadmap progress in one auto-mode
+session, validated end-to-end on test-1.
 
-The gap from "PoC that works for me" → "tool people actually adopt"
-is **control + trust + speed + repeatability**, in that order. Not AI
-quality. The model is good enough; the system around it is not yet
-predictable enough.
+### Shipped (live-tested or unit-tested, on `main`)
+
+| # | Phase | Status | Notes |
+|---|---|---|---|
+| 1 | Determinism (phase contracts) | ✅ live | exemplar + retry pattern; first-pass on demo |
+| 2 | Telemetry (session metrics) | ✅ live | metrics.jsonl + first-pass-rate badge |
+| 3 | Quickstart demo | ✅ live | one-click, opens portfolio HTML in browser |
+| 4a | Inbox compressor + token telemetry | ✅ shipped | passive (waiting for long dev report to exercise) |
+| 5 | Git branch isolation (sprint 1+2) | ✅ live | enable / commit-per-turn / accept / discard all working |
+| 6 | Decision trail + markdown export | ✅ shipped | tested clicking through the panel + export |
+| 7 | Failure catalog + standardised banner + stuck detector | ✅ shipped | catalogue lookup tested; stuck detector not yet seen firing live |
+| 8 | Agent role clarity (tester + refactorer) | ✅ live | 3-task routing test: dev/tester/refactorer all selected correctly |
+| 9 | Positioning / README (sprint 1) | ✅ shipped | 4 review iterations, settled at ~155 lines |
+
+### Remaining
+
+| # | Phase | Why deferred |
+|---|---|---|
+| 4-2 | Sup memory layer + DEVELOPER_REPORT smarter compression | high-risk: changes how sup's user message is composed; needs design pass |
+| 9-2 | Use-case gallery + architecture diagram (SVG) + demo video + landing page | needs real telemetry + graphic + recording work |
+| 10 | Docker sandbox | "probably won't ship" per ROADMAP — Phase 5 covers most of the trust surface |
+| 8b | Agent plugin system | post-v1.0; only when external operators ask for custom roles |
+
+### Open polish + small TODOs
+
+- README iteration 5 — needs 3+ unfamiliar readers to test the first 5 lines (per ROADMAP §9 rule). Current is at "8.5/10" per peer review; the path to 9.5 is empirical, not editorial.
+- README does **not** convey the system's autonomy capability (Telegram bridge, ScheduleWakeup self-pacing, walk-away usage). Single honest sentence in opening would fix; deferred until decision.
+- Phase 5+6+7 sprint-2 features were shipped but not all live-validated — error banner, stuck banner, decision trail export still need a real-world session to exercise.
+- Distribution plan (Show HN / X / LinkedIn launch posts) — parked post-v1.0 in the calibration log; not started.
+- Phase 9 sprint 2 use-case gallery wants Phase 2 telemetry data from real users; depends on adoption.
+
+### Validation owed
+
+Three sprint-2 features shipped but unconfirmed live:
+- Phase 5 sprint 2: themed confirm modal (modal renders; Accept tested live, Discard not)
+- Phase 6 sprint 2: markdown export endpoint + button (export tested, content shape from real session)
+- Phase 7 sprint 2A: turn-error banner (catalogue maps work in unit; banner not seen firing live)
+- Phase 7 sprint 2B: stuck detector (heuristic + tests pass; banner not seen firing live)
+
+None of these are blocking — they passed unit tests and the wiring is straightforward. Live confirmation would just be a polish pass.
 
 ---
 
