@@ -37,6 +37,11 @@ import { commitTurn } from './git-isolation.js';
 import type { PhaseContractAttemptEvent } from '../orchestrator/phase-contracts.js';
 import { classifyFailure } from '../orchestrator/failure-modes.js';
 import {
+  detectStuck,
+  isProgressMarker,
+  type StuckCheckResult,
+} from '../orchestrator/stuck-detector.js';
+import {
   readPhases,
   type ConfirmEvidence,
   type PhasesFile,
@@ -103,6 +108,21 @@ export type SessionEvent =
    * of just printing the raw message.
    */
   | { kind: 'turn-error'; message: string; code: string; role: string | null }
+  /**
+   * Phase 7 sprint 2B — stuck detector transition. Emitted only on
+   * transitions (entered-stuck or recovered) so the frontend sees
+   * the change without being spammed every tick. When `stuck=true`,
+   * `reason` carries the heuristic branch that fired and
+   * `minutesSinceProgress` is the (informational) age of the last
+   * progress marker (null when none has been seen yet).
+   */
+  | {
+      kind: 'session-stuck';
+      stuck: boolean;
+      reason: string;
+      minutesSinceProgress: number | null;
+      ts: number;
+    }
   | { kind: 'turn-busy'; busy: boolean }
   | { kind: 'user-note-dev'; text: string; ts: number }
   | { kind: 'user-message-dev'; text: string; ts: number }
@@ -310,6 +330,16 @@ export interface SessionContext {
     startedAt: number;
     lastCommitAt: number | null;
   } | null;
+  /**
+   * Phase 7 sprint 2B — stuck detection state. `lastProgressTs` is
+   * updated whenever an event lands that counts as forward motion
+   * (file write, phase mutation, verdict, task delegation —
+   * `isProgressMarker` is the source of truth). `currentlyStuck`
+   * tracks the last result of `detectStuck` so the periodic check
+   * can emit `session-stuck` only on transitions, not on every tick.
+   */
+  lastProgressTs: number | null;
+  currentlyStuck: boolean;
   agentThinkingDeltaCount: Map<string, number>;
 }
 
@@ -349,9 +379,31 @@ export interface SessionSnapshot {
 export class SessionManager extends EventEmitter {
   private readonly sessions = new Map<string, SessionContext>();
   private readonly wakeups = new WakeupRunner();
+  /**
+   * Phase 7 sprint 2B — global timer that runs the stuck detector
+   * across every active session. 30s cadence is conservative
+   * (cheaper than per-session timers; cheap enough that the UI
+   * banner appears within ~30s of crossing the threshold).
+   */
+  private stuckCheckTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     super();
+    this.stuckCheckTimer = setInterval(() => {
+      for (const ctx of this.sessions.values()) {
+        try {
+          this.checkStuck(ctx);
+        } catch (e) {
+          log('warn', 'session.stuck_check_failed', {
+            id: ctx.id,
+            error: (e as Error).message,
+          });
+        }
+      }
+    }, 30_000);
+    // Don't keep the Node process alive just because of this timer —
+    // the daemon's lifecycle is owned by the web server.
+    this.stuckCheckTimer.unref?.();
     // Single shared listener: every wakeup state change becomes a chat-log
     // entry + SSE event for the owning session.
     this.wakeups.onEvent((sessionId, event) => {
@@ -460,6 +512,8 @@ export class SessionManager extends EventEmitter {
       agentDeltaCount: new Map(),
       agentThinkingDeltaCount: new Map(),
       gitIsolation: null,
+      lastProgressTs: null,
+      currentlyStuck: false,
     };
     this.sessions.set(id, ctx);
     this.attachOrchestratorEvents(ctx);
@@ -1456,6 +1510,13 @@ export class SessionManager extends EventEmitter {
   }
 
   private async appendLog(ctx: SessionContext, entry: ChatLogEntry): Promise<void> {
+    // Phase 7 sprint 2B — sniff progress markers as events flow
+    // through. We never need to scan the chat-log later; the
+    // periodic stuck check just reads ctx.lastProgressTs.
+    const toolName = (entry as { name?: string }).name;
+    if (isProgressMarker(entry.type, toolName)) {
+      ctx.lastProgressTs = entry.ts;
+    }
     try {
       await appendChatLogEntry(ctx.cwd, entry);
     } catch (e) {
@@ -1464,6 +1525,46 @@ export class SessionManager extends EventEmitter {
         error: (e as Error).message,
       });
     }
+  }
+
+  /**
+   * Phase 7 sprint 2B — run the stuck detector against this session
+   * and emit `session-stuck` only on transitions. Cheap (pure
+   * function over a 6-field input), so the periodic timer can call
+   * it freely.
+   */
+  private checkStuck(ctx: SessionContext): void {
+    const fsm = ctx.orchestrator.getState();
+    // FsmState.shutdown has no `phase` field (terminal state); for
+    // shutdown sessions stuck-detection is moot anyway. Fall back to
+    // a benign label that maps to "no special handling" inside the
+    // detector.
+    const phase = 'phase' in fsm ? fsm.phase : 'shutdown';
+    const result: StuckCheckResult = detectStuck({
+      nowMs: Date.now(),
+      lastProgressTs: ctx.lastProgressTs,
+      supTurnCount: ctx.supMetrics.totalTurns,
+      fsmPhase: phase,
+      hasPending:
+        ctx.orchestrator.listPendingQuestions().length > 0 ||
+        ctx.orchestrator.listPendingApprovals().length > 0,
+      busy: ctx.busy !== null,
+    });
+    if (result.stuck === ctx.currentlyStuck) return;
+    ctx.currentlyStuck = result.stuck;
+    log('info', 'session.stuck_transition', {
+      id: ctx.id,
+      stuck: result.stuck,
+      reason: result.reason,
+      minutesSinceProgress: result.minutesSinceProgress,
+    });
+    this.emitEvent(ctx, {
+      kind: 'session-stuck',
+      stuck: result.stuck,
+      reason: result.reason,
+      minutesSinceProgress: result.minutesSinceProgress,
+      ts: Date.now(),
+    });
   }
 
   private emitEvent(ctx: SessionContext, event: SessionEvent): void {

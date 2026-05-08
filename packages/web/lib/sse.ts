@@ -46,6 +46,7 @@ export function subscribeSession(
     'approval-resolved',
     'iteration-end',
     'turn-error',
+    'session-stuck',
     'turn-busy',
     'user-note-dev',
     'user-message-dev',

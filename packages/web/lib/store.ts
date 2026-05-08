@@ -61,6 +61,18 @@ export interface SessionState {
    * stays scoped to the active session.
    */
   lastTurnError: { code: string; role: string | null; message: string; ts: number } | null;
+  /**
+   * Phase 7 sprint 2B — current stuck status. Updated on every
+   * `session-stuck` SSE transition. The banner component reads this
+   * directly; null means we've never had a stuck transition (clean
+   * session that hasn't hit the threshold yet).
+   */
+  stuckStatus: {
+    stuck: boolean;
+    reason: string;
+    minutesSinceProgress: number | null;
+    ts: number;
+  } | null;
 }
 
 const emptyRoleMetrics = (): RoleMetrics => ({
@@ -127,6 +139,7 @@ const empty: SessionState = {
   scripts: null,
   pendingProposalAlert: null,
   lastTurnError: null,
+  stuckStatus: null,
 };
 
 const HISTORY_LIMIT = 1000;
@@ -750,6 +763,21 @@ export const useSessionStore = create<MultiSessionState>((set) => ({
               role: event.role,
               message: event.message,
               ts: Date.now(),
+            },
+          };
+          break;
+        case 'session-stuck':
+          // Phase 7 sprint 2B — record the latest transition. Banner
+          // reads this directly; the orchestrator only emits on
+          // stuck/unstuck flips so we never overwrite with stale
+          // state.
+          next = {
+            ...cur,
+            stuckStatus: {
+              stuck: event.stuck,
+              reason: event.reason,
+              minutesSinceProgress: event.minutesSinceProgress,
+              ts: event.ts,
             },
           };
           break;

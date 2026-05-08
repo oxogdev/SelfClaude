@@ -296,6 +296,15 @@ export type SessionEvent =
    * the structured fields so the UI can render a catalogue-driven
    * banner instead of just the raw message. */
   | { kind: 'turn-error'; message: string; code: string; role: string | null }
+  /** Phase 7 sprint 2B — stuck-detector transition. Emitted only on
+   * stuck/unstuck flips so the banner doesn't flicker. */
+  | {
+      kind: 'session-stuck';
+      stuck: boolean;
+      reason: string;
+      minutesSinceProgress: number | null;
+      ts: number;
+    }
   | { kind: 'turn-busy'; busy: boolean }
   | { kind: 'user-note-dev'; text: string; ts: number }
   | { kind: 'user-message-dev'; text: string; ts: number }
