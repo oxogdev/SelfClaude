@@ -4,7 +4,7 @@
   "description": "Multi-agent orchestration on top of Claude Code. Supervisor delegates, specialists execute, you gate. Browser-based IDE; local-first.",
   "private": true,
   "type": "module",
-  "license": "MIT",
+  "license": "BUSL-1.1",
   "author": "badursun <badursun@gmail.com>",
   "homepage": "https://github.com/badursun/SelfClaude",
   "repository": {

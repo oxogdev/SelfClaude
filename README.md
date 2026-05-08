@@ -222,4 +222,6 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md). Short version: terse code, tests requi
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+[Business Source License 1.1](./LICENSE) — free for individual + small-team use (≤10 people), commercial licensing required for larger organizations or anyone offering it as a hosted service. Converts to **Apache 2.0** on **2030-05-08**.
+
+For commercial licensing, see [COMMERCIAL.md](./COMMERCIAL.md) or email **badursun@gmail.com**.
