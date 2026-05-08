@@ -1,6 +1,8 @@
 # SelfClaude
 
-A multi-agent layer for [Claude Code](https://docs.claude.com/en/docs/claude-code/quickstart). Instead of one CC session juggling frontend + backend + tests + security and slowly losing the thread, SelfClaude delegates each concern to its own specialist (separate subprocess, separate context); a supervisor coordinates and reports back to you.
+An **autonomous multi-agent layer** on top of [Claude Code](https://docs.claude.com/en/docs/claude-code/quickstart). You hand the supervisor a goal; it plans, delegates to specialists (developer · ui-dev · security · tester · refactorer), verifies their output (reads files, runs tests, opens pages in Chrome, reads logs), and gates phases — without you sitting at the keyboard for each step. You only get pulled in for ambiguous trade-offs or destructive actions. Everything else runs.
+
+Off-screen escalation goes through Telegram (optional). The chat-log + per-session git branch capture every decision, so you can step away for an hour and come back to a reviewable diff.
 
 Install Claude Code first if you don't already use it — this is a layer, not a replacement.
 
@@ -38,10 +40,12 @@ sup              Phase complete.
 ```
 
 Four things to notice:
-1. **Refactorer refused.** Its contract says "no rework on a red baseline." Sup adapted instead of forcing.
-2. **Developer's first fix was incomplete.** Forgot an import; typecheck caught it; second pass fixed it. Real turns aren't one-shot.
-3. **Sup over-asked at the end.** It wanted to re-run the suite via `tester` even though `refactorer` had already run it. You corrected the redundancy in one line — sup logged your intervention and moved on.
-4. **Two commits land** on a session-scoped git branch (if isolation is enabled — one-click toggle in the status bar). Click **Accept** to squash-merge into your branch, **Discard** to wipe the branch and restore the worktree.
+1. **You were here for one prompt and one one-line correction.** The rest — three delegations, a refusal, a re-route, an incomplete-fix retry, a typecheck pass, a test pass — all happened without you. That's the loop: you set direction, sup runs the work, you sign off.
+2. **Refactorer refused.** Its contract says "no rework on a red baseline." Sup adapted instead of forcing.
+3. **Developer's first fix was incomplete.** Forgot an import; typecheck caught it; second pass fixed it. Sup didn't ask you to look — it kept the inner loop tight on its own.
+4. **Sup over-asked at the end** — wanted to re-run the suite via `tester` even though `refactorer` had already run it. Sup is conservative when it isn't sure; that's where your one-line corrections come in. Common over-asks: "should I commit this?", "do you want a security pass?", "phase complete?". Always one-line answers.
+
+Two commits land on a session-scoped git branch (if isolation is enabled — one-click toggle in the status bar). Click **Accept** to squash-merge into your branch, **Discard** to wipe the branch and restore the worktree.
 
 ---
 
@@ -105,11 +109,15 @@ If any of these are dealbreakers — wait a release cycle, or open an issue desc
 
 ## How it works
 
+The default mode is **autonomous**: sup runs without operator intervention until it finishes the goal or hits something it can't decide alone.
+
 Three-step loop:
 
-1. **You write** a request to sup in the chat box.
-2. **Sup reads** the request, your `CLAUDE.md`, and any prior session state. It decides: ask a clarifying question, write a phase doc + delegate, or finish.
-3. **Specialists execute** in their own Claude Code subprocesses. They report back to sup; sup verifies (reads files, runs tests, screenshots via Chrome when needed) and either marks the work done or sends it back.
+1. **You write** a request to sup in the chat box (and then can leave).
+2. **Sup reads** the request, your `CLAUDE.md`, and any prior session state. It plans, writes a phase doc, registers tracker items, then delegates to specialists. After each agent reports back, sup verifies the work itself — reads the changed files, runs `pnpm test` or `curl` smoke checks via Bash, opens the page in Chrome to confirm a UI render, reads logs. Marks items done or sends them back. Walks itself across phases until done.
+3. **Sup pulls you in** only when it has to: an ambiguous trade-off (`ask_user`), a destructive action (`request_user_approval`), a security concern that needs your call. Telegram bridges these to your phone if you're not at the keyboard.
+
+The implication: between your initial prompt and the next time you check in, the system is doing real work — not waiting for you to click "next." The chat-log captures everything so review is post-hoc, not real-time.
 
 **How sup decides who gets what.** Prompt-based, not deterministic — the decision rubric lives in `supervisor.md`. A simplified decision tree:
 
