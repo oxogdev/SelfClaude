@@ -31,11 +31,16 @@ import {
   PanelRightOpen,
   Plus,
   PlusCircle,
+  Send,
   Settings,
+  ShieldCheck,
+  ShieldX,
   TerminalSquare,
   Trash2,
   Unlock,
+  UserCheck,
   Wrench,
+  X,
 } from 'lucide-react';
 import hljs from 'highlight.js/lib/common';
 import { cn } from '@/lib/cn';
@@ -2529,56 +2534,432 @@ function UserGlobalViewerModal({
   );
 }
 
-/* ───────────────── Decision Room (verdicts) ───────────────── */
+/* ───────────────── Decision trail (Phase 6 — Replay & audit) ───────────────── */
+
+/**
+ * Unified decision trail. Surfaces every chat-log entry that
+ * represents a *decision moment* — sup verdicts, phase-tracker
+ * mutations, approval requests + resolutions, delegation handoffs.
+ *
+ * Per ROADMAP Phase 6 calibration: this is a trust-signalling
+ * feature, not a high-traffic one. ~80% of operators won't
+ * actively scrub through it. So we ship the minimum that's actually
+ * useful — a chronological card list with filter chips — and skip
+ * the gold-plating (search across sessions, side-by-side
+ * comparison, syntax-highlighted diffs).
+ *
+ * Entries land in time order (oldest first). The chip strip
+ * narrows the feed without re-fetching; "All" is the default.
+ */
+
+type DecisionFilter = 'all' | 'verdicts' | 'phase' | 'approvals' | 'delegations';
+
+interface DecisionEntry {
+  /** Time-ordered key for React. */
+  key: string;
+  /** Stable group; drives icon, accent, and filter routing. */
+  kind: 'verdict' | 'phase' | 'approval' | 'delegation';
+  ts: number;
+  /** Underlying chat-log entry — the renderer narrows on `entry.type`. */
+  entry: ChatLogEntry;
+}
+
+function buildDecisionTrail(chatLog: ChatLogEntry[]): DecisionEntry[] {
+  const out: DecisionEntry[] = [];
+  for (let i = 0; i < chatLog.length; i++) {
+    const e = chatLog[i]!;
+    let kind: DecisionEntry['kind'] | null = null;
+    switch (e.type) {
+      case 'verdict':
+        kind = 'verdict';
+        break;
+      case 'phase-doc-written':
+      case 'phase-registered':
+      case 'phase-item-confirmed':
+      case 'phase-item-rejected':
+      case 'phase-item-operator-verified':
+        kind = 'phase';
+        break;
+      case 'approval':
+      case 'approval-resolved':
+        kind = 'approval';
+        break;
+      case 'task-marker':
+        kind = 'delegation';
+        break;
+      default:
+        kind = null;
+    }
+    if (kind) {
+      out.push({ key: `${e.ts}-${i}`, kind, ts: e.ts, entry: e });
+    }
+  }
+  return out;
+}
 
 function DecisionRoomPanel({ chatLog }: { chatLog: ChatLogEntry[] }) {
-  const verdicts = chatLog.filter(
-    (e): e is Extract<ChatLogEntry, { type: 'verdict' }> => e.type === 'verdict',
-  );
-  if (verdicts.length === 0) {
+  const trail = useMemo(() => buildDecisionTrail(chatLog), [chatLog]);
+  const [filter, setFilter] = useState<DecisionFilter>('all');
+
+  const filtered = useMemo(() => {
+    if (filter === 'all') return trail;
+    if (filter === 'verdicts') return trail.filter((e) => e.kind === 'verdict');
+    if (filter === 'phase') return trail.filter((e) => e.kind === 'phase');
+    if (filter === 'approvals') return trail.filter((e) => e.kind === 'approval');
+    return trail.filter((e) => e.kind === 'delegation');
+  }, [trail, filter]);
+
+  // Counts per group — drives the chip badges so the operator can see
+  // at a glance whether a category has any entries before clicking it.
+  const counts = useMemo(() => {
+    const c = { all: trail.length, verdicts: 0, phase: 0, approvals: 0, delegations: 0 };
+    for (const e of trail) {
+      if (e.kind === 'verdict') c.verdicts += 1;
+      else if (e.kind === 'phase') c.phase += 1;
+      else if (e.kind === 'approval') c.approvals += 1;
+      else if (e.kind === 'delegation') c.delegations += 1;
+    }
+    return c;
+  }, [trail]);
+
+  if (trail.length === 0) {
     return (
       <div className="p-2 text-[11px] text-zinc-500 italic leading-relaxed">
-        No verdicts yet. The supervisor declares binding cross-agent
-        decisions via <code>{'<VERDICT id="N">…</VERDICT>'}</code>; they
-        appear here numbered chronologically and are broadcast to every
-        active specialist's inbox.
+        No decisions yet. Verdicts, phase confirmations, approval
+        decisions, and task delegations land here as they happen —
+        every binding moment in the project, chronological.
       </div>
     );
   }
+
   return (
-    <div className="p-2 space-y-2">
-      {verdicts.map((v) => {
-        const d = new Date(v.ts);
-        const time = `${d.getHours().toString().padStart(2, '0')}:${d
-          .getMinutes()
-          .toString()
-          .padStart(2, '0')}`;
-        return (
-          <div
-            key={`${v.ts}-${v.id}`}
-            className="rounded border-l-4 border-red-500 border-r border-y border-red-700/50 bg-red-950/30 px-2.5 py-2"
-          >
-            <div className="flex items-center gap-1.5 mb-1">
-              <Gavel size={12} className="text-red-300 shrink-0" />
-              <span className="text-[10px] uppercase tracking-widest font-bold text-red-300">
-                karar
-              </span>
-              <span className="text-[10px] text-red-400 font-mono tabular-nums">
-                #{v.id.toString().padStart(3, '0')}
-              </span>
-              <span
-                className="ml-auto text-[10px] font-mono text-red-500 tabular-nums"
-                title={d.toLocaleString()}
-              >
-                {time}
-              </span>
-            </div>
-            <p className="text-[12px] leading-relaxed whitespace-pre-wrap text-red-50 font-mono">
-              {v.text}
-            </p>
+    <div className="flex flex-col h-full">
+      <DecisionFilterChips filter={filter} onFilter={setFilter} counts={counts} />
+      <div className="flex-1 overflow-y-auto scrollbar-thin">
+        {filtered.length === 0 ? (
+          <div className="p-3 text-[11px] text-zinc-500 italic">
+            No entries in this category yet.
           </div>
+        ) : (
+          <div className="p-2 space-y-1.5">
+            {filtered.map((e) => (
+              <DecisionCard key={e.key} entry={e} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DecisionFilterChips({
+  filter,
+  onFilter,
+  counts,
+}: {
+  filter: DecisionFilter;
+  onFilter: (f: DecisionFilter) => void;
+  counts: { all: number; verdicts: number; phase: number; approvals: number; delegations: number };
+}) {
+  const chips: { key: DecisionFilter; label: string; count: number }[] = [
+    { key: 'all', label: 'All', count: counts.all },
+    { key: 'verdicts', label: 'Verdicts', count: counts.verdicts },
+    { key: 'phase', label: 'Phase', count: counts.phase },
+    { key: 'approvals', label: 'Approvals', count: counts.approvals },
+    { key: 'delegations', label: 'Delegations', count: counts.delegations },
+  ];
+  return (
+    <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border/50 bg-bg-subtle/40 overflow-x-auto scrollbar-thin">
+      {chips.map((chip) => {
+        const active = filter === chip.key;
+        return (
+          <button
+            key={chip.key}
+            type="button"
+            onClick={() => onFilter(chip.key)}
+            className={cn(
+              'shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium uppercase tracking-wider transition-colors',
+              active
+                ? 'bg-cyan-700/40 text-cyan-100 border border-cyan-600/40'
+                : 'text-zinc-400 hover:text-zinc-100 hover:bg-bg-elevated border border-transparent',
+            )}
+          >
+            <span>{chip.label}</span>
+            <span
+              className={cn(
+                'tabular-nums text-[9px]',
+                active ? 'text-cyan-300' : 'text-zinc-500',
+              )}
+            >
+              {chip.count}
+            </span>
+          </button>
         );
       })}
+    </div>
+  );
+}
+
+function formatDecisionTime(ts: number): { time: string; full: string } {
+  const d = new Date(ts);
+  const time = `${d.getHours().toString().padStart(2, '0')}:${d
+    .getMinutes()
+    .toString()
+    .padStart(2, '0')}`;
+  return { time, full: d.toLocaleString() };
+}
+
+/**
+ * Per-entry card. The shape is union'd on `entry.type` so each kind
+ * gets its own icon, accent, and body — instead of one generic card
+ * that loses information across types.
+ */
+function DecisionCard({ entry }: { entry: DecisionEntry }) {
+  const e = entry.entry;
+  const { time, full } = formatDecisionTime(entry.ts);
+
+  if (e.type === 'verdict') {
+    return (
+      <div className="rounded border-l-4 border-red-500 border-r border-y border-red-700/50 bg-red-950/30 px-2.5 py-2">
+        <div className="flex items-center gap-1.5 mb-1">
+          <Gavel size={12} className="text-red-300 shrink-0" />
+          <span className="text-[10px] uppercase tracking-widest font-bold text-red-300">
+            karar
+          </span>
+          <span className="text-[10px] text-red-400 font-mono tabular-nums">
+            #{e.id.toString().padStart(3, '0')}
+          </span>
+          <span
+            className="ml-auto text-[10px] font-mono text-red-500 tabular-nums"
+            title={full}
+          >
+            {time}
+          </span>
+        </div>
+        <p className="text-[12px] leading-relaxed whitespace-pre-wrap text-red-50 font-mono">
+          {e.text}
+        </p>
+      </div>
+    );
+  }
+
+  if (e.type === 'phase-doc-written') {
+    return (
+      <DecisionRow
+        icon={<FileText size={11} className="text-cyan-300" />}
+        accent="cyan"
+        label="phase doc"
+        title={
+          <span>
+            wrote <code className="text-cyan-100">{e.filename}</code>
+          </span>
+        }
+        time={time}
+        fullTime={full}
+      />
+    );
+  }
+
+  if (e.type === 'phase-registered') {
+    return (
+      <DecisionRow
+        icon={<ListChecks size={11} className="text-cyan-300" />}
+        accent="cyan"
+        label={e.isReregistration ? 're-registered' : 'registered'}
+        title={
+          <span>
+            <code className="text-cyan-100">{e.slug}</code>
+            <span className="text-zinc-500"> · </span>
+            <span className="text-zinc-300">
+              {e.itemCount} item{e.itemCount === 1 ? '' : 's'}
+            </span>
+            <span className="text-zinc-500"> · </span>
+            <span className="text-zinc-400">{e.title}</span>
+          </span>
+        }
+        time={time}
+        fullTime={full}
+      />
+    );
+  }
+
+  if (e.type === 'phase-item-confirmed') {
+    const evidenceCount = e.evidence?.totalCount ?? 0;
+    return (
+      <DecisionRow
+        icon={<CheckCircle2 size={11} className="text-emerald-400" />}
+        accent="emerald"
+        label="confirmed"
+        title={
+          <span>
+            <code className="text-emerald-100">{e.slug}/{e.itemId}</code>
+            <span className="text-zinc-500"> · </span>
+            <span className="text-zinc-300">{e.itemTitle}</span>
+            {evidenceCount > 0 && (
+              <span className="ml-1 text-[10px] text-emerald-400">
+                ({evidenceCount} verification call{evidenceCount === 1 ? '' : 's'})
+              </span>
+            )}
+          </span>
+        }
+        body={e.notes ? e.notes : null}
+        time={time}
+        fullTime={full}
+      />
+    );
+  }
+
+  if (e.type === 'phase-item-rejected') {
+    return (
+      <DecisionRow
+        icon={<X size={11} className="text-rose-400" />}
+        accent="rose"
+        label="rejected"
+        title={
+          <span>
+            <code className="text-rose-100">{e.slug}/{e.itemId}</code>
+            <span className="text-zinc-500"> · </span>
+            <span className="text-zinc-300">{e.itemTitle}</span>
+          </span>
+        }
+        body={e.reason}
+        time={time}
+        fullTime={full}
+      />
+    );
+  }
+
+  if (e.type === 'phase-item-operator-verified') {
+    return (
+      <DecisionRow
+        icon={<UserCheck size={11} className="text-amber-300" />}
+        accent="amber"
+        label="operator verified"
+        title={
+          <span>
+            <code className="text-amber-100">{e.slug}/{e.itemId}</code>
+            <span className="text-zinc-500"> · </span>
+            <span className="text-zinc-300">{e.itemTitle}</span>
+          </span>
+        }
+        body={e.notes ? e.notes : null}
+        time={time}
+        fullTime={full}
+      />
+    );
+  }
+
+  if (e.type === 'approval') {
+    return (
+      <DecisionRow
+        icon={<ShieldCheck size={11} className="text-amber-300" />}
+        accent="amber"
+        label="approval requested"
+        title={<span className="text-zinc-200">{e.action}</span>}
+        body={e.reason}
+        time={time}
+        fullTime={full}
+      />
+    );
+  }
+
+  if (e.type === 'approval-resolved') {
+    const allow = e.decision === 'allow';
+    return (
+      <DecisionRow
+        icon={
+          allow ? (
+            <ShieldCheck size={11} className="text-emerald-400" />
+          ) : (
+            <ShieldX size={11} className="text-rose-400" />
+          )
+        }
+        accent={allow ? 'emerald' : 'rose'}
+        label={allow ? 'approved' : 'denied'}
+        title={
+          <span className="text-zinc-200 font-mono text-[10px]">
+            request id {e.id.slice(0, 8)}
+          </span>
+        }
+        time={time}
+        fullTime={full}
+      />
+    );
+  }
+
+  if (e.type === 'task-marker') {
+    return (
+      <DecisionRow
+        icon={<Send size={11} className="text-violet-300" />}
+        accent="violet"
+        label="delegated"
+        title={<span className="text-zinc-200">{e.summary}</span>}
+        time={time}
+        fullTime={full}
+      />
+    );
+  }
+
+  // Defensive — should never hit because buildDecisionTrail filters tightly.
+  return null;
+}
+
+function DecisionRow({
+  icon,
+  accent,
+  label,
+  title,
+  body,
+  time,
+  fullTime,
+}: {
+  icon: React.ReactNode;
+  accent: 'cyan' | 'emerald' | 'amber' | 'violet' | 'rose';
+  label: string;
+  title: React.ReactNode;
+  body?: string | null;
+  time: string;
+  fullTime: string;
+}) {
+  const accentBorder = {
+    cyan: 'border-cyan-700/40 bg-cyan-950/20',
+    emerald: 'border-emerald-700/40 bg-emerald-950/20',
+    amber: 'border-amber-700/40 bg-amber-950/20',
+    violet: 'border-violet-700/40 bg-violet-950/20',
+    rose: 'border-rose-700/40 bg-rose-950/20',
+  }[accent];
+  const labelTone = {
+    cyan: 'text-cyan-300',
+    emerald: 'text-emerald-300',
+    amber: 'text-amber-300',
+    violet: 'text-violet-300',
+    rose: 'text-rose-300',
+  }[accent];
+  return (
+    <div className={cn('rounded border px-2.5 py-1.5', accentBorder)}>
+      <div className="flex items-center gap-1.5">
+        <span className="shrink-0">{icon}</span>
+        <span
+          className={cn(
+            'text-[10px] uppercase tracking-widest font-semibold',
+            labelTone,
+          )}
+        >
+          {label}
+        </span>
+        <span
+          className="ml-auto text-[10px] font-mono text-zinc-500 tabular-nums"
+          title={fullTime}
+        >
+          {time}
+        </span>
+      </div>
+      <div className="text-[12px] leading-snug mt-0.5 text-zinc-200">{title}</div>
+      {body && (
+        <div className="text-[11px] text-zinc-400 mt-1 whitespace-pre-wrap leading-snug">
+          {body}
+        </div>
+      )}
     </div>
   );
 }
