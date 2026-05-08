@@ -1,7 +1,16 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Code, Layers, Plus, Send, Shield, Sparkles } from 'lucide-react';
+import {
+  Code,
+  FlaskConical,
+  Layers,
+  Plus,
+  Send,
+  Shield,
+  Sparkles,
+  Wrench,
+} from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { computeAgentStatus } from './agent-status';
 import { AgentTimeline } from './agent-timeline';
@@ -15,7 +24,7 @@ import type { DerivedState } from '@/lib/api';
  * `developer` slot stays first because it's the default `<TASK_FOR_DEVELOPER>`
  * target. Order matches the registry `BUILTIN_AGENTS` semantics.
  */
-const KNOWN_SPECIALISTS = ['developer', 'ui-dev', 'security'] as const;
+const KNOWN_SPECIALISTS = ['developer', 'ui-dev', 'security', 'tester', 'refactorer'] as const;
 
 /**
  * Multi-agent dev pane. Renders a horizontal tab strip across all known
@@ -243,18 +252,26 @@ const AGENT_ICON: Record<string, React.ElementType> = {
   developer: Code,
   'ui-dev': Layers,
   security: Shield,
+  tester: FlaskConical,
+  refactorer: Wrench,
 };
 
 const AGENT_LABEL: Record<string, string> = {
   developer: 'developer',
   'ui-dev': 'ui-dev',
   security: 'security',
+  tester: 'tester',
+  refactorer: 'refactorer',
 };
 
 const AGENT_DESCRIPTION: Record<string, string> = {
   developer: 'Backend / general-purpose implementation. Writes code, runs tests, edits configs.',
   'ui-dev': 'Frontend specialist (admin-panel oriented). shadcn/ui + Tailwind, strict standards.',
   security: 'Read-only auditor. Inspects diffs/configs for secrets, injection, auth bypass, deps.',
+  tester:
+    'Verification-only specialist. Adds + runs tests; refuses to edit product code or change a passing assertion.',
+  refactorer:
+    'Bounded-scope rework. Renames / splits / dedupes / tightens types; refuses features, new deps, or behaviour changes.',
 };
 
 const AGENT_TAB_ACCENT: Record<string, { active: string; idle: string; dot: string }> = {
@@ -272,6 +289,16 @@ const AGENT_TAB_ACCENT: Record<string, { active: string; idle: string; dot: stri
     active: 'border-rose-500 text-rose-200 bg-rose-950/30',
     idle: 'border-transparent text-zinc-400 hover:text-zinc-100',
     dot: 'bg-rose-400',
+  },
+  tester: {
+    active: 'border-emerald-500 text-emerald-200 bg-emerald-950/30',
+    idle: 'border-transparent text-zinc-400 hover:text-zinc-100',
+    dot: 'bg-emerald-400',
+  },
+  refactorer: {
+    active: 'border-zinc-500 text-zinc-200 bg-zinc-800/40',
+    idle: 'border-transparent text-zinc-400 hover:text-zinc-100',
+    dot: 'bg-zinc-400',
   },
 };
 

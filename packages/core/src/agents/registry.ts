@@ -8,18 +8,24 @@ import { projectAgentPromptPath, readProjectAgentPrompt } from './dna.js';
  * agent topology, what their default capabilities are, and where their
  * system prompts live on disk.
  *
- * Today we ship four built-in roles:
+ * v1.0 ships **six** built-in roles (Phase 8 hard cap):
  *
  *   • supervisor — the always-on lead. Plans, delegates, gates phases.
  *   • developer  — the backend / general-purpose implementation agent.
  *   • ui-dev     — the frontend / admin-panel specialist (shadcn + tailwind).
  *   • security   — read-only reviewer that audits diffs before phase close.
+ *   • tester     — verification-only specialist. Adds and runs tests; does
+ *                  not change product code paths.
+ *   • refactorer — bounded-scope rework specialist. Renames, deduplicates,
+ *                  splits files; never adds features or new dependencies.
  *
- * The registry is intentionally extensible: additional roles can be
- * defined in `~/.selfclaude/agents.json` (or a project-local override at
- * `<cwd>/.selfclaude/agents.json`) without touching this file. Custom
- * roles must point at a real markdown system-prompt file; the orchestrator
- * spawns CC subprocesses with that prompt appended.
+ * **Hard cap on built-in roles (Phase 8 / ROADMAP calibration #8).** No
+ * further agents land in core for v1.0. Additional roles ride via the
+ * project-local override at `<cwd>/.selfclaude/agents.json` or the
+ * user-global one at `~/.selfclaude/agents.json` (loader pending in
+ * Sprint 2.5). The cap exists because each new agent multiplies the
+ * delegation surface — more contracts, more failure modes, more places
+ * sup can pick wrong.
  *
  * Performance discipline: every read of an agent's system prompt is
  * cached after first load. Prompts can be hot-edited from the UI, so the
@@ -33,7 +39,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PROMPTS_DIR = resolve(HERE, '..', 'claude-code', 'system-prompts');
 
 /** Roles the orchestrator gives special handling. */
-export type BuiltInAgentName = 'supervisor' | 'developer' | 'ui-dev' | 'security';
+export type BuiltInAgentName =
+  | 'supervisor'
+  | 'developer'
+  | 'ui-dev'
+  | 'security'
+  | 'tester'
+  | 'refactorer';
 
 /**
  * Static configuration for one agent role. The system-prompt path can be
@@ -120,6 +132,33 @@ export const BUILTIN_AGENTS: Record<BuiltInAgentName, AgentConfig> = {
       "Read-only auditor. Inspects diffs and configs for secrets, injection vectors, auth " +
       "bypass, dependency vulnerabilities. Reports findings to the supervisor; never edits " +
       "code itself.",
+  },
+  tester: {
+    name: 'tester',
+    label: 'Tester',
+    systemPromptFile: 'tester.md',
+    spawnable: true,
+    readOnly: false,
+    accent: 'emerald',
+    description:
+      "Verification-only specialist. Adds and runs tests; never edits product code. " +
+      "Pairs with developer / ui-dev — they ship the feature, tester writes the suite that " +
+      "proves it works (and catches the next regression). Touches `tests/`, `__tests__/`, " +
+      "or `*.test.*` files only; refuses tasks that would require changing the system under " +
+      "test.",
+  },
+  refactorer: {
+    name: 'refactorer',
+    label: 'Refactorer',
+    systemPromptFile: 'refactorer.md',
+    spawnable: true,
+    readOnly: false,
+    accent: 'zinc',
+    description:
+      "Bounded-scope rework specialist. Renames, splits oversized files, deduplicates " +
+      "logic, tightens types — without adding features, new dependencies, or new public " +
+      "APIs. Refuses scope creep: if a task crosses into 'while we're at it, also add X', " +
+      "it bounces back to sup for re-routing.",
   },
 };
 
