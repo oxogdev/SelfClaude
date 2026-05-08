@@ -289,7 +289,9 @@ export type SessionEvent =
   | { kind: 'approval'; approval: PendingApproval }
   | { kind: 'approval-resolved'; id: string; decision: 'allow' | 'deny' }
   | { kind: 'iteration-end'; iteration: number }
-  | { kind: 'error'; message: string }
+  /** Turn-level failure (sup/dev/agent caught exception). NOT a connection
+   * error — those are signalled out-of-band via SSE's native `error` event. */
+  | { kind: 'turn-error'; message: string }
   | { kind: 'turn-busy'; busy: boolean }
   | { kind: 'user-note-dev'; text: string; ts: number }
   | { kind: 'user-message-dev'; text: string; ts: number }

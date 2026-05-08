@@ -9,6 +9,7 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { AgentStatus, type AgentStatusInfo } from './agent-status';
 import { BubbleMarkdown } from './bubble-markdown';
 import { InputBar } from './input-bar';
 import { ToolCard } from './tool-card';
@@ -63,8 +64,13 @@ export function AgentTimeline({
   loadingHistory: boolean;
   /** Server-derived wakeup list (full session). Drives the wakeup overlay. */
   wakeups: DerivedState['wakeups'] | null;
-  /** Optional — currently only the developer pane has a meaningful one. */
-  status?: { kind: string } | null;
+  /**
+   * Live status info for the active agent. Drives the bottom strip
+   * with the running label + the Stop button. Phase 7 fix:
+   * specialists now also receive a real status from `computeAgentStatus`,
+   * so every agent timeline gets the abort affordance — not just sup.
+   */
+  status?: AgentStatusInfo | null;
 }) {
   const items = useMemo(() => buildAgentItems(chatLog, agent), [chatLog, agent]);
   const ref = useRef<HTMLDivElement>(null);
@@ -280,6 +286,7 @@ export function AgentTimeline({
           <ArrowDown size={14} />
         </button>
       )}
+      <AgentStatus status={status ?? null} variant={agent} />
       <InputBar variant={agent} busy={busy} onSubmit={onSubmit} />
     </div>
   );

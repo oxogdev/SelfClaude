@@ -716,7 +716,7 @@ export const useSessionStore = create<MultiSessionState>((set) => ({
           }
           break;
         case 'iteration-end':
-        case 'error':
+        case 'turn-error':
           // No-op for state; could surface via toast in UI.
           break;
       }

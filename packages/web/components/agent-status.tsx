@@ -85,6 +85,56 @@ export function computeDevStatus(
   return { kind: 'working' };
 }
 
+/**
+ * Specialist agents (ui-dev, security, …) flow through the same
+ * `dev-running` FSM state as the default developer, so we use
+ * `meta.devActive` as the running gate. The unresolved-tool scan
+ * filters by the agent's name so a ui-dev tab shows ui-dev's tool,
+ * not the developer's.
+ *
+ * Phase 7 fix: this is what mounts the stop button on dev/specialist
+ * timelines. Before this, only sup had the abort affordance — every
+ * other agent silently ran to completion.
+ */
+export function computeAgentStatus(
+  agent: string,
+  meta: SessionMeta | null,
+  chatLog: ChatLogEntry[],
+  streamingTs: number | null,
+): AgentStatusInfo | null {
+  if (agent === 'developer') {
+    return computeDevStatus(meta, chatLog, streamingTs);
+  }
+  if (!meta?.devActive) return null;
+  for (let i = chatLog.length - 1; i >= 0; i--) {
+    const e = chatLog[i]!;
+    if (e.type === 'agent-tool-call' && e.agent === agent) {
+      const resolved = chatLog.some(
+        (r) =>
+          r.type === 'agent-tool-result' &&
+          r.agent === agent &&
+          r.toolUseId === e.toolUseId,
+      );
+      if (!resolved) {
+        return {
+          kind: 'tool',
+          toolName: e.name,
+          toolDetail: summarizeToolInput(e.name, e.input),
+        };
+      }
+      break;
+    }
+    if (
+      (e.type === 'agent-text' && e.agent === agent) ||
+      e.type === 'sup-message'
+    ) {
+      break;
+    }
+  }
+  if (streamingTs !== null) return { kind: 'writing' };
+  return { kind: 'working' };
+}
+
 function summarizeToolInput(name: string, input: Record<string, unknown>): string | undefined {
   if (name === 'Bash') {
     const cmd = String(input.command ?? '');
@@ -105,7 +155,15 @@ export function AgentStatus({
   variant,
 }: {
   status: AgentStatusInfo | null;
-  variant: 'sup' | 'dev';
+  /**
+   * `'sup'` for supervisor, `'dev'` for the default developer, or any
+   * specialist agent name (`'ui-dev'`, `'security'`, custom) for the
+   * agent timeline. The variant drives the label + accent + the abort
+   * routing — specialists share the developer abort controller in
+   * the orchestrator, so non-sup variants all map to role='developer'
+   * for the abort endpoint.
+   */
+  variant: 'sup' | 'dev' | string;
 }) {
   const params = useParams<{ id: string }>();
   const sessionId = params?.id;
@@ -121,8 +179,14 @@ export function AgentStatus({
 
   if (!status) return null;
 
-  const colorClass = variant === 'sup' ? 'text-cyan-400' : 'text-amber-400';
-  const phrases = variant === 'sup' ? SUP_PHRASES : DEV_PHRASES;
+  const isSup = variant === 'sup';
+  const colorClass = isSup ? 'text-cyan-400' : 'text-amber-400';
+  const phrases = isSup ? SUP_PHRASES : DEV_PHRASES;
+  // Variant labels: sup → 'supervisor', dev → 'developer', anything
+  // else (specialist) → the agent name verbatim. Falls back cleanly
+  // for any future custom agent.
+  const variantLabel =
+    variant === 'sup' ? 'supervisor' : variant === 'dev' ? 'developer' : variant;
 
   let labelText: string;
   let detail: string | undefined;
@@ -134,7 +198,10 @@ export function AgentStatus({
     labelText = arr[tick % arr.length] ?? arr[0]!;
   }
 
-  const role = variant === 'sup' ? 'supervisor' : 'developer';
+  // Specialists share the developer abort controller — sending
+  // role='developer' from a ui-dev/security tab kills the active turn,
+  // which is correct since only one agent runs at a time.
+  const role: 'supervisor' | 'developer' = isSup ? 'supervisor' : 'developer';
 
   /** Fire the abort. The status bar disappears as soon as the SSE
    *  `turn-busy false` event lands; we don't need any local state for it. */
@@ -164,7 +231,7 @@ export function AgentStatus({
           <span />
           <span />
         </span>
-        <span>{variant === 'sup' ? 'supervisor' : 'developer'}</span>
+        <span>{variantLabel}</span>
         <span className="text-zinc-500">·</span>
         <span>{labelText}</span>
         {detail && (
@@ -190,7 +257,7 @@ export function AgentStatus({
       <ConfirmDialog
         open={confirming}
         title={`Stop the ${role}?`}
-        message={`This will SIGTERM the ${role}'s Claude Code subprocess immediately. Any in-flight tool call will be killed and the turn will end with an error. The session itself stays alive — you can prompt it again afterward.\n\nUse this when the ${role} appears stuck (a hung Bash command, a runaway loop, a wakeup that shouldn't have fired).`}
+        message={`This will SIGTERM the ${variantLabel}'s Claude Code subprocess immediately. Any in-flight tool call will be killed and the turn will end with an error. The session itself stays alive — you can prompt it again afterward.\n\nUse this when the ${variantLabel} appears stuck (a hung Bash command, a runaway loop, a wakeup that shouldn't have fired).`}
         confirmLabel="Stop now"
         cancelLabel="Keep running"
         variant="danger"

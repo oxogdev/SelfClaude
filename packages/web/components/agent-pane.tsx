@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Code, Layers, Plus, Send, Shield, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/cn';
-import { computeDevStatus } from './agent-status';
+import { computeAgentStatus } from './agent-status';
 import { AgentTimeline } from './agent-timeline';
 import type { ChatLogEntry, SessionMeta } from '@/lib/types';
 import type { DerivedState } from '@/lib/api';
@@ -167,13 +167,20 @@ export function AgentPane({
     setActiveTab(target);
   }, [activeAgents]);
 
-  // Status only meaningful for the developer (per-specialist status would
-  // need its own per-agent compute; kept null until we add that).
-  const devStatus = useMemo(
+  // Phase 7 fix: status is now meaningful for any agent — not just the
+  // default developer. `computeAgentStatus` routes the developer
+  // through the existing `computeDevStatus` path and scans
+  // `agent-tool-call` entries scoped to the agent name for
+  // specialists. The Stop button at the bottom of every agent
+  // timeline is what this powers.
+  const agentStatus = useMemo(
     () =>
-      effectiveTab === 'developer'
-        ? computeDevStatus(meta, chatLog, streamingDevTs)
-        : null,
+      computeAgentStatus(
+        effectiveTab,
+        meta,
+        chatLog,
+        effectiveTab === 'developer' ? streamingDevTs : null,
+      ),
     [meta, chatLog, streamingDevTs, effectiveTab],
   );
 
@@ -219,7 +226,7 @@ export function AgentPane({
             hasMoreHistory={hasMoreHistory}
             loadingHistory={loadingHistory}
             wakeups={wakeups}
-            status={devStatus}
+            status={agentStatus}
           />
         ) : (
           <ProposeAgentPanel

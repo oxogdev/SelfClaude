@@ -91,7 +91,13 @@ export type SessionEvent =
   | { kind: 'approval'; approval: PendingApprovalView }
   | { kind: 'approval-resolved'; id: string; decision: 'allow' | 'deny' }
   | { kind: 'iteration-end'; iteration: number }
-  | { kind: 'error'; message: string }
+  /**
+   * Turn-level failure event. Renamed from `error` to `turn-error` so
+   * EventSource's native connection-error listener doesn't fire on
+   * server-sent custom 'error' frames — that collision used to surface
+   * a spurious "Lost connection" toast every time a turn aborted.
+   */
+  | { kind: 'turn-error'; message: string }
   | { kind: 'turn-busy'; busy: boolean }
   | { kind: 'user-note-dev'; text: string; ts: number }
   | { kind: 'user-message-dev'; text: string; ts: number }
@@ -2300,7 +2306,7 @@ export class SessionManager extends EventEmitter {
    * Phase 7 — surface a caught error to the operator AND record the
    * failure in the metrics store with a classified `FailureCode`.
    *
-   * Replaces the bare `emitEvent({kind: 'error', message})` pattern
+   * Replaces the bare `emitEvent({kind: 'turn-error', message})` pattern
    * scattered throughout the catch blocks: every error path now lands
    * in the failure rollup, so the bottom-toolbar badge + project
    * rollup show an honest count instead of an underestimate (per
@@ -2316,7 +2322,7 @@ export class SessionManager extends EventEmitter {
   ): void {
     const code = classifyFailure(rawMessage);
     const message = rawMessage.length > 1024 ? `${rawMessage.slice(0, 1024)}…` : rawMessage;
-    this.emitEvent(ctx, { kind: 'error', message: rawMessage });
+    this.emitEvent(ctx, { kind: 'turn-error', message: rawMessage });
     void this.recordMetric(ctx, {
       kind: 'failure',
       sessionId: ctx.id,

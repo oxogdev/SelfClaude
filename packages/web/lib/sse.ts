@@ -45,7 +45,7 @@ export function subscribeSession(
     'approval',
     'approval-resolved',
     'iteration-end',
-    'error',
+    'turn-error',
     'turn-busy',
     'user-note-dev',
     'user-message-dev',
@@ -89,7 +89,22 @@ export function subscribeSession(
     });
   }
 
-  if (onError) es.addEventListener('error', onError);
+  // EventSource's native 'error' listener fires on connection-level
+  // problems (initial-connect failure, mid-stream drop). It also
+  // fires for ANY server-sent custom event named 'error' — that
+  // collision used to surface a spurious "Lost connection" toast on
+  // every aborted turn. The orchestrator's turn-failure event is now
+  // 'turn-error', but we still defensively gate the connection-error
+  // handler on event-shape: a real connection error is a plain Event
+  // (no `data`), while a server-sent custom event arrives as a
+  // MessageEvent. If a future kind ever lands on 'error' again, the
+  // guard catches it cleanly.
+  if (onError) {
+    es.addEventListener('error', (ev: Event) => {
+      if (ev instanceof MessageEvent) return;
+      onError(ev);
+    });
+  }
 
   return {
     close: () => es.close(),
