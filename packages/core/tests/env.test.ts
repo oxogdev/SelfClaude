@@ -69,11 +69,13 @@ test('setEnvVar rejects invalid env keys', async () => {
   });
 });
 
-test('generatePairingCode produces a 6-digit numeric string', () => {
+test('generatePairingCode produces an 8-char alphanumeric string', () => {
   for (let i = 0; i < 50; i++) {
     const code = generatePairingCode();
-    assert.match(code, /^\d{6}$/, `unexpected code: ${code}`);
-    const n = Number(code);
-    assert.ok(n >= 100_000 && n < 1_000_000);
+    assert.match(code, /^[0-9A-Z]{8}$/, `unexpected code: ${code}`);
   }
+  // 36^8 ≈ 2.8 trillion combinations — 50 generations should never
+  // collide. If they do, the CSPRNG is misbehaving.
+  const codes = new Set(Array.from({ length: 50 }, () => generatePairingCode()));
+  assert.equal(codes.size, 50, 'expected 50 unique codes from 50 generations');
 });

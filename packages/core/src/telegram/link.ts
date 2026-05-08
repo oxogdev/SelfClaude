@@ -3,9 +3,28 @@ import { Bot } from 'grammy';
 import { ENV_PATH, setEnvVar } from '../lib/env.js';
 import { log } from '../lib/log.js';
 
-/** 6-digit numeric pairing code drawn from a CSPRNG. */
+/**
+ * 8-character alphanumeric pairing code drawn from a CSPRNG.
+ *
+ * 36^8 ≈ 2.8 trillion combinations ≈ 47 bits of entropy — comfortably
+ * above the 30-bit threshold a brute-forcer with rate-limited Telegram
+ * bot APIs would need to walk in any reasonable window. Up from the
+ * earlier 6-digit numeric (10^6 ≈ 20 bits), which was within range of
+ * a determined attacker if rate limiting ever slipped.
+ *
+ * Codes are uppercase + digits only — easier to read aloud / type
+ * across devices than mixed-case (the operator pastes the code into
+ * the bot chat manually).
+ *
+ * Bumped per PR #1 (Ersin KOÇ — security pass).
+ */
 export function generatePairingCode(): string {
-  return String(randomInt(100_000, 1_000_000));
+  const ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  let code = '';
+  for (let i = 0; i < 8; i++) {
+    code += ALPHABET[randomInt(0, ALPHABET.length)]!;
+  }
+  return code;
 }
 
 export interface LinkResult {

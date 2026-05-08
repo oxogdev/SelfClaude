@@ -10,6 +10,47 @@ export type Role = 'supervisor' | 'developer';
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
 
+/**
+ * Env vars stripped from the inherited environment before forwarding to a
+ * Claude Code subprocess. Two reasons (defence in depth):
+ *
+ *   • SelfClaude operator credentials (Telegram bot token + chat id) have
+ *     no business inside an agent's process. Even if the agent's prompt
+ *     never asks for them, an env leak via tool output, an `env` Bash
+ *     call, or a misconfigured logger could exfiltrate them.
+ *
+ *   • Anthropic credentials (API key, base URL, version) belong to
+ *     Claude Code's own configuration (`~/.claude/settings.json`).
+ *     SelfClaude never reads them; passing them through the parent
+ *     environment just creates duplicate trust paths the operator can't
+ *     audit.
+ *
+ * Anything not in this set passes through unchanged, so the subprocess
+ * still inherits PATH, HOME, language settings, etc.
+ *
+ * Suggested by an external contributor (PR #1, Ersin KOÇ — security pass).
+ */
+const BLOCKED_ENV_VARS = new Set<string>([
+  'TELEGRAM_BOT_TOKEN',
+  'TELEGRAM_CHAT_ID',
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_VERSION',
+]);
+
+function buildSubprocessEnv(envOverrides?: Record<string, string>): NodeJS.ProcessEnv {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (!BLOCKED_ENV_VARS.has(k) && v !== undefined) out[k] = v;
+  }
+  if (envOverrides) {
+    for (const [k, v] of Object.entries(envOverrides)) {
+      if (v !== undefined) out[k] = v;
+    }
+  }
+  return out;
+}
+
 export interface SpawnOptions {
   role: Role;
   cwd: string;
@@ -87,7 +128,7 @@ export function runClaudeTurn(
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, {
       cwd: opts.cwd,
-      env: { ...process.env, ...opts.envOverrides },
+      env: buildSubprocessEnv(opts.envOverrides),
       stdio: ['pipe', 'pipe', 'pipe'],
       signal: opts.signal,
     });
