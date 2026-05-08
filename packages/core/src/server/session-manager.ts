@@ -35,6 +35,7 @@ import {
 } from '../project/git-isolation-store.js';
 import { commitTurn } from './git-isolation.js';
 import type { PhaseContractAttemptEvent } from '../orchestrator/phase-contracts.js';
+import { classifyFailure } from '../orchestrator/failure-modes.js';
 import {
   readPhases,
   type ConfirmEvidence,
@@ -562,7 +563,7 @@ export class SessionManager extends EventEmitter {
         ctx.supervisorSessionId = result.supervisorSessionId ?? ctx.supervisorSessionId;
         ctx.developerSessionId = result.developerSessionId ?? ctx.developerSessionId;
       } catch (e) {
-        this.emitEvent(ctx, { kind: 'error', message: (e as Error).message });
+        this.surfaceFailure(ctx, 'supervisor', (e as Error).message);
       } finally {
         ctx.currentAbort = null;
         ctx.busy = null;
@@ -691,7 +692,7 @@ export class SessionManager extends EventEmitter {
           await this.followUpSupervisor(ctx, SUP_FOLLOWUP_AFTER_DEV_DIRECT, controller.signal);
         }
       } catch (e) {
-        this.emitEvent(ctx, { kind: 'error', message: (e as Error).message });
+        this.surfaceFailure(ctx, agent, (e as Error).message);
       } finally {
         ctx.currentAbort = null;
         ctx.busy = null;
@@ -769,7 +770,7 @@ export class SessionManager extends EventEmitter {
           await this.followUpSupervisor(ctx, SUP_FOLLOWUP_AFTER_DEV_DIRECT, controller.signal);
         }
       } catch (e) {
-        this.emitEvent(ctx, { kind: 'error', message: (e as Error).message });
+        this.surfaceFailure(ctx, 'developer', (e as Error).message);
       } finally {
         ctx.currentAbort = null;
         ctx.busy = null;
@@ -2296,6 +2297,37 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
+   * Phase 7 — surface a caught error to the operator AND record the
+   * failure in the metrics store with a classified `FailureCode`.
+   *
+   * Replaces the bare `emitEvent({kind: 'error', message})` pattern
+   * scattered throughout the catch blocks: every error path now lands
+   * in the failure rollup, so the bottom-toolbar badge + project
+   * rollup show an honest count instead of an underestimate (per
+   * ROADMAP calibration #7: "publicly visible").
+   *
+   * Truncation: caller messages can be giant (CC stack traces, JSON
+   * blobs); 1KB is enough for triage, more would inflate the JSONL.
+   */
+  private surfaceFailure(
+    ctx: SessionContext,
+    role: string | null,
+    rawMessage: string,
+  ): void {
+    const code = classifyFailure(rawMessage);
+    const message = rawMessage.length > 1024 ? `${rawMessage.slice(0, 1024)}…` : rawMessage;
+    this.emitEvent(ctx, { kind: 'error', message: rawMessage });
+    void this.recordMetric(ctx, {
+      kind: 'failure',
+      sessionId: ctx.id,
+      code,
+      role,
+      message,
+      ts: Date.now(),
+    });
+  }
+
+  /**
    * Heuristic: pull a file path out of a tool input record. Different
    * Claude Code tools name the field differently (`file_path`, `path`,
    * `notebook_path`, `filename`); we check the common ones in priority
@@ -2626,7 +2658,7 @@ export class SessionManager extends EventEmitter {
         ctx.supervisorSessionId = result.supervisorSessionId ?? ctx.supervisorSessionId;
         ctx.developerSessionId = result.developerSessionId ?? ctx.developerSessionId;
       } catch (e) {
-        this.emitEvent(ctx, { kind: 'error', message: (e as Error).message });
+        this.surfaceFailure(ctx, 'supervisor', (e as Error).message);
       } finally {
         ctx.currentAbort = null;
         ctx.busy = null;
@@ -2700,7 +2732,7 @@ export class SessionManager extends EventEmitter {
           await this.followUpSupervisor(ctx, SUP_FOLLOWUP_AFTER_WAKEUP, controller.signal);
         }
       } catch (e) {
-        this.emitEvent(ctx, { kind: 'error', message: (e as Error).message });
+        this.surfaceFailure(ctx, 'developer', (e as Error).message);
       } finally {
         ctx.currentAbort = null;
         ctx.busy = null;
@@ -2740,7 +2772,7 @@ export class SessionManager extends EventEmitter {
       ctx.supervisorSessionId = result.supervisorSessionId ?? ctx.supervisorSessionId;
       ctx.developerSessionId = result.developerSessionId ?? ctx.developerSessionId;
     } catch (e) {
-      this.emitEvent(ctx, { kind: 'error', message: (e as Error).message });
+      this.surfaceFailure(ctx, 'supervisor', (e as Error).message);
     }
   }
 }

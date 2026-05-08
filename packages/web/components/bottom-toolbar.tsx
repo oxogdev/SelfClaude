@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Activity,
+  AlertOctagon,
   CheckCircle2,
   ChevronUp,
   Clock,
@@ -184,6 +185,8 @@ export function BottomToolbar({
       />
       <Sep />
       <ContractBadge rollup={contractRollup} />
+      <Sep />
+      <FailureBadge rollup={contractRollup} />
       <div className="flex-1" />
       <MetricsBreakdown metrics={metrics} agentEntries={agentEntries} />
     </div>
@@ -301,6 +304,53 @@ function MetricsBreakdown({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Phase 7 telemetry — failure-rate badge. Surfaces the count of
+ * classified failures recorded for this session. Tooltip breaks the
+ * total down by `FailureCode` so the operator can tell at a glance
+ * whether the failures are ignorable (mostly aborts) or worth
+ * investigating (network errors, agent timeouts).
+ *
+ * Per ROADMAP calibration #7: this is publicly visible by design.
+ * Hiding the rate doesn't fix it; surfacing it builds the trust we
+ * actually want — the operator can see the failure mode catalogue
+ * working without being surprised when something goes wrong.
+ *
+ * Goes muted (zinc) when count is 0; rose-tinted at 1+; deeper rose
+ * + bg accent at 5+ to nudge the operator to scan the audit log.
+ */
+function FailureBadge({ rollup }: { rollup: SessionMetricsRollup | null }) {
+  const f = rollup?.failures;
+  const total = f?.total ?? 0;
+  if (total === 0) {
+    return (
+      <Badge
+        icon={<AlertOctagon size={10} />}
+        label="0 fail"
+        color="text-zinc-500"
+        title="No classified failures this session — Phase 7 catalogue."
+      />
+    );
+  }
+  const tooltip =
+    `${total} classified failure${total === 1 ? '' : 's'} this session:\n` +
+    Object.entries(f?.byCode ?? {})
+      .sort((a, b) => b[1] - a[1])
+      .map(([code, n]) => `  • ${code}: ${n}`)
+      .join('\n');
+  const tone = total >= 5 ? 'text-rose-200' : 'text-rose-300';
+  const bg = total >= 5 ? 'bg-rose-950/40' : undefined;
+  return (
+    <Badge
+      icon={<AlertOctagon size={10} />}
+      label={`${total} fail`}
+      color={tone}
+      bg={bg}
+      title={tooltip}
+    />
   );
 }
 

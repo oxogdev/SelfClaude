@@ -378,6 +378,87 @@ test('computeSessionRollup: aggregates tokens-estimated events into inboxCompres
   });
 });
 
+test('computeSessionRollup: aggregates failure events into failures', async () => {
+  await withFreshStore(async (cwd) => {
+    await appendSessionMetricsEvent(cwd, { kind: 'session-start', sessionId: 's', ts: 0 });
+    await appendSessionMetricsEvent(cwd, {
+      kind: 'failure',
+      sessionId: 's',
+      code: 'tool-error',
+      role: 'developer',
+      message: 'Edit failed',
+      ts: 1,
+    });
+    await appendSessionMetricsEvent(cwd, {
+      kind: 'failure',
+      sessionId: 's',
+      code: 'tool-error',
+      role: 'developer',
+      message: 'Bash failed',
+      ts: 2,
+    });
+    await appendSessionMetricsEvent(cwd, {
+      kind: 'failure',
+      sessionId: 's',
+      code: 'agent-aborted',
+      role: 'supervisor',
+      message: 'Aborted by operator',
+      ts: 3,
+    });
+    const events = await readSessionMetrics(cwd);
+    const r = computeSessionRollup(events, 's', 100);
+    assert.equal(r.failures.total, 3);
+    assert.equal(r.failures.byCode['tool-error'], 2);
+    assert.equal(r.failures.byCode['agent-aborted'], 1);
+  });
+});
+
+test('computeSessionRollup: failures zeroed when none recorded', async () => {
+  await withFreshStore(async (cwd) => {
+    await appendSessionMetricsEvent(cwd, { kind: 'session-start', sessionId: 's', ts: 0 });
+    const events = await readSessionMetrics(cwd);
+    const r = computeSessionRollup(events, 's', 100);
+    assert.equal(r.failures.total, 0);
+    assert.deepEqual(r.failures.byCode, {});
+  });
+});
+
+test('computeProjectRollup: aggregates failures across sessions', async () => {
+  await withFreshStore(async (cwd) => {
+    await appendSessionMetricsEvent(cwd, { kind: 'session-start', sessionId: 'a', ts: 0 });
+    await appendSessionMetricsEvent(cwd, {
+      kind: 'failure',
+      sessionId: 'a',
+      code: 'tool-error',
+      role: 'developer',
+      message: 'x',
+      ts: 1,
+    });
+    await appendSessionMetricsEvent(cwd, { kind: 'session-start', sessionId: 'b', ts: 100 });
+    await appendSessionMetricsEvent(cwd, {
+      kind: 'failure',
+      sessionId: 'b',
+      code: 'tool-error',
+      role: 'developer',
+      message: 'y',
+      ts: 101,
+    });
+    await appendSessionMetricsEvent(cwd, {
+      kind: 'failure',
+      sessionId: 'b',
+      code: 'network-error',
+      role: null,
+      message: 'z',
+      ts: 102,
+    });
+    const events = await readSessionMetrics(cwd);
+    const r = computeProjectRollup(events);
+    assert.equal(r.failures.total, 3);
+    assert.equal(r.failures.byCode['tool-error'], 2);
+    assert.equal(r.failures.byCode['network-error'], 1);
+  });
+});
+
 test('computeSessionRollup: inboxCompression zeroed when no drain events seen', async () => {
   await withFreshStore(async (cwd) => {
     await appendSessionMetricsEvent(cwd, { kind: 'session-start', sessionId: 's', ts: 0 });

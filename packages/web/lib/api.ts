@@ -640,6 +640,15 @@ export interface SessionMetricsRollup {
     estimatedTokensSaved: number;
     compressionRatio: number;
   };
+  /**
+   * Phase 7 failure aggregate. Per ROADMAP calibration #7, the rate
+   * is publicly visible — the bottom-toolbar badge surfaces `total`
+   * and the tooltip breaks it down by `byCode`.
+   */
+  failures: {
+    total: number;
+    byCode: Record<string, number>;
+  };
 }
 
 export interface ProjectMetricsRollup {
@@ -649,4 +658,9 @@ export interface ProjectMetricsRollup {
   filesTouched: number;
   phaseContract: PhaseContractMetrics;
   activeDurationMs: number;
+  /** Phase 7 — cumulative failure aggregate across every session. */
+  failures: {
+    total: number;
+    byCode: Record<string, number>;
+  };
 }

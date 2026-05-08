@@ -97,6 +97,24 @@ export const SessionMetricsEventSchema = z.discriminatedUnion('kind', [
     preservedMarkers: z.array(z.string()),
     ts: z.number(),
   }),
+  /**
+   * Phase 7 telemetry — every classified failure surfaces here. Per
+   * ROADMAP calibration #7, the rate is publicly visible: this event
+   * is what feeds the bottom-toolbar failure badge + the project
+   * rollup's `failureRate`. `code` matches the FailureCode union in
+   * `orchestrator/failure-modes.ts`; tests guard the spelling.
+   */
+  z.object({
+    kind: z.literal('failure'),
+    sessionId: z.string(),
+    /** Stable code from the failure-mode catalog. */
+    code: z.string(),
+    /** Optional role/agent that hit the failure (when known). */
+    role: z.string().nullable().optional(),
+    /** Raw error message, truncated to 1KB so the JSONL stays readable. */
+    message: z.string().max(1024),
+    ts: z.number(),
+  }),
 ]);
 export type SessionMetricsEvent = z.infer<typeof SessionMetricsEventSchema>;
 
@@ -199,6 +217,17 @@ export interface SessionMetricsRollup {
     /** 0–1 ratio. 0 when no drains, otherwise compressed / original. */
     compressionRatio: number;
   };
+  /**
+   * Phase 7 failure aggregate. `total` is the raw count; `byCode`
+   * breaks it down per `FailureCode` so the toolbar tooltip + the
+   * project rollup can show which failure modes dominate. Empty
+   * sessions have all zeros.
+   */
+  failures: {
+    total: number;
+    /** Map of `FailureCode` → count. Codes not seen aren't present. */
+    byCode: Record<string, number>;
+  };
 }
 
 export interface ProjectMetricsRollup {
@@ -220,6 +249,11 @@ export interface ProjectMetricsRollup {
   };
   /** Sum of session durations (gaps between sessions are NOT counted). */
   activeDurationMs: number;
+  /** Phase 7 — cumulative failure aggregate across every session. */
+  failures: {
+    total: number;
+    byCode: Record<string, number>;
+  };
 }
 
 /**
@@ -255,6 +289,10 @@ export function computeSessionRollup(
   let estimatedOriginalTokens = 0;
   let estimatedCompressedTokens = 0;
 
+  // Phase 7 — failure aggregate.
+  let failuresTotal = 0;
+  const failuresByCode: Record<string, number> = {};
+
   for (const e of filtered) {
     if (e.kind === 'turn') {
       turns[e.who] += 1;
@@ -281,6 +319,9 @@ export function computeSessionRollup(
       drainEvents += 1;
       estimatedOriginalTokens += e.originalTokens;
       estimatedCompressedTokens += e.compressedTokens;
+    } else if (e.kind === 'failure') {
+      failuresTotal += 1;
+      failuresByCode[e.code] = (failuresByCode[e.code] ?? 0) + 1;
     }
   }
 
@@ -325,6 +366,10 @@ export function computeSessionRollup(
           ? 0
           : estimatedCompressedTokens / estimatedOriginalTokens,
     },
+    failures: {
+      total: failuresTotal,
+      byCode: failuresByCode,
+    },
   };
 }
 
@@ -342,6 +387,10 @@ export function computeProjectRollup(events: SessionMetricsEvent[]): ProjectMetr
   type FilenameAgg = { firstAttemptValid: boolean | null; everValid: boolean; attempts: number };
   const phasePerFilename = new Map<string, FilenameAgg>();
   let overrides = 0;
+
+  // Phase 7 — failure aggregate (project-level).
+  let failuresTotal = 0;
+  const failuresByCode: Record<string, number> = {};
 
   // Per-session start/end pairing for active duration.
   const startsBySession = new Map<string, number>();
@@ -370,6 +419,9 @@ export function computeProjectRollup(events: SessionMetricsEvent[]): ProjectMetr
       // Latest end wins.
       const prev = endsBySession.get(e.sessionId);
       if (prev === undefined || e.ts > prev) endsBySession.set(e.sessionId, e.ts);
+    } else if (e.kind === 'failure') {
+      failuresTotal += 1;
+      failuresByCode[e.code] = (failuresByCode[e.code] ?? 0) + 1;
     }
   }
 
@@ -402,5 +454,9 @@ export function computeProjectRollup(events: SessionMetricsEvent[]): ProjectMetr
       distinctFilenames,
     },
     activeDurationMs,
+    failures: {
+      total: failuresTotal,
+      byCode: failuresByCode,
+    },
   };
 }
