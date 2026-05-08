@@ -487,6 +487,47 @@ already half-decided.
 
 ---
 
+### Phase 8b — Agent plugin system (post-v1.0)
+
+**Goal.** Let operators add custom roles without forking core. Built-
+in roster stays hard-capped at 6 (Phase 8 cap); novel specialists
+ride via a config + system-prompt drop-in.
+
+**Sketch (NOT a build plan — that comes later):**
+
+- **Config file**: `~/.selfclaude/agents.json` (user-global) +
+  `<cwd>/.selfclaude/agents.json` (project-local). Project-local
+  shadows user-global; built-ins always win on name conflicts.
+- **Schema**: same shape as `BUILTIN_AGENTS` entries — `name`,
+  `label`, `systemPromptFile`, `spawnable`, `readOnly`, `accent`,
+  `description`. The systemPromptFile path is relative to
+  `~/.selfclaude/system-prompts/` (already the override location).
+- **Registry loader**: read both files at boot (and on file change),
+  merge into the in-memory registry. Existing `getAgent` /
+  `listAgents` API surface unchanged.
+- **Sup awareness**: when sup discovers a non-built-in agent in the
+  registry, its delegation rubric falls back to the agent's
+  `description` field. Operators get less determinism out of custom
+  agents than built-ins (whose rubric lives in `supervisor.md`),
+  which is the right tradeoff.
+- **UI surface**: agent-pane's `KNOWN_SPECIALISTS` becomes a runtime
+  fetch instead of a hardcoded array. Tab-strip renders custom
+  agents alongside built-ins; accent palette extended to a fixed
+  set the JSON config picks from.
+
+**Out of scope** (deliberately):
+- Plugin marketplace / discovery / install commands.
+- Sandboxed execution of plugin code (the system prompt is data,
+  not code — the only "execution" is what CC does with it).
+- Hot-swap reload of running sessions when a plugin changes — too
+  brittle, just restart the session.
+
+**When to build**: when at least one external operator has hit the
+limit of the built-in roster and described a concrete use case the
+plugin system would solve. Premature now.
+
+---
+
 ### Phase 10 — Docker sandbox (probably won't ship)
 
 **Goal.** *Maybe* full container isolation for high-risk environments.
